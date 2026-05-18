@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.opencode/
+.venv/
+opencode.json
+specs/*
+__pycache__/
+AGENTS.md
+uv.lock
+data/*
+*.xls
