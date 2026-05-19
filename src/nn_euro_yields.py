@@ -317,13 +317,19 @@ def _resolve_outfile_path(
     if outfile_path is None:
         return Path.cwd() / downloaded_file.name
 
-    return Path(outfile_path).expanduser()
+    destination = Path(outfile_path).expanduser()
+    raw_outfile_path = str(outfile_path)
+    if destination.is_dir() or raw_outfile_path.endswith(("/", "\\")):
+        return destination / downloaded_file.name
+
+    return destination
 
 
 def download_yields(
     start_date: date | datetime | str | None = None,
     end_date: date | datetime | str | None = None,
     outfile_path: str | Path | None = None,
+    append_timestamp: bool = False,
 ) -> Path:
     """Download NN Euro Alap yield spreadsheet using headless Selenium Chromium.
 
@@ -334,7 +340,7 @@ def download_yields(
     resolved_start_date, resolved_end_date = _resolve_dates(start_date, end_date)
     start_parts = _to_hungarian_date_parts(resolved_start_date)
     end_parts = _to_hungarian_date_parts(resolved_end_date)
-
+    
     with tempfile.TemporaryDirectory(prefix="nn-euro-hozam-") as tmpdir:
         download_dir = Path(tmpdir)
         driver = _build_driver(download_dir)
@@ -380,6 +386,15 @@ def download_yields(
             driver.quit()
 
         destination = _resolve_outfile_path(downloaded_file, outfile_path)
+        
+        if append_timestamp:
+            start = start_parts.display_value.replace(". ", "-").rstrip(".")
+            end = end_parts.display_value.replace(". ", "-").rstrip(".")
+            timestamp = f"{start}_{end}"
+            destination = destination.with_name(
+                f"{destination.stem}_{timestamp}{destination.suffix}"
+            )
+        
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(downloaded_file), destination)
 
@@ -391,18 +406,32 @@ def download_yields(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Download NN Euro Alap yield spreadsheet."
+        description="Download NN Euro Alap rendszeres díjas yield spreadsheet."
     )
     parser.add_argument(
-        "--start-date", help="Start date as ISO date, for example 2026-05-10."
+        "--start-date",
+        required=False,
+        help="Start date as ISO date, for example 2026-05-10.\
+              Defaults to seven days before end date.",
     )
     parser.add_argument(
         "--end-date",
-        help="End date as ISO date, for example 2026-05-17. Defaults to yesterday.",
+        required=False,
+        help="End date as ISO date, for example 2026-05-17.\
+              Defaults to yesterday.",
     )
     parser.add_argument(
         "--outfile-path",
-        help="Destination file path, including folder and filename.",
+        required=False,
+        help="Destination file path, including folder and filename.\
+              Defaults to the browser-provided filename in the current directory.",
+    )
+    parser.add_argument(
+        "--append-timestamp",
+        action="store_true",
+        default=True,
+        required=False,
+        help="Append a timestamp to the output filename.",
     )
     return parser.parse_args()
 
@@ -413,6 +442,7 @@ def main() -> None:
         start_date=args.start_date,
         end_date=args.end_date,
         outfile_path=args.outfile_path,
+        append_timestamp=args.append_timestamp,
     )
     print(output_path)
 
