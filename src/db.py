@@ -1,5 +1,7 @@
+import shutil
 import sqlite3
 from color_logger import logger
+
 
 TABLE_NAME = 'nn_euro_yields'
 DB_FOLDER = 'db'
@@ -48,6 +50,9 @@ def query_all():
     results = cursor.fetchall()
     conn.close()
     return results
+
+def backup():
+    shutil.copy2(DB_FILE, f'{DB_FILE}.backup')
 
 if __name__ == '__main__':
     drop()

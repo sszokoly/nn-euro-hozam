@@ -230,3 +230,4 @@ data/*
 test-results/*
 launch.json
 nn.log
+db/*.backup

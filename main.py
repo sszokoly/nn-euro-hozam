@@ -1,6 +1,6 @@
 import sys
 from data_wrangler import wrangle
-from db import drop, create, insert, query_all
+from db import drop, create, insert, backup
 
 def main():
     try:
@@ -8,6 +8,7 @@ def main():
         drop()
         create()
         insert(data)
+        backup()
     except Exception as e:
         print(f"An error occurred: {e}", file=sys.stderr)
 
