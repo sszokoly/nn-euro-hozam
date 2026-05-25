@@ -325,7 +325,7 @@ def _resolve_outfile_path(
     return destination
 
 
-def download_yields(
+def download_yields_xls(
     start_date: date | datetime | str | None = None,
     end_date: date | datetime | str | None = None,
     outfile_path: str | Path | None = None,
@@ -438,7 +438,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    output_path = download_yields(
+    output_path = download_yields_xls(
         start_date=args.start_date,
         end_date=args.end_date,
         outfile_path=args.outfile_path,

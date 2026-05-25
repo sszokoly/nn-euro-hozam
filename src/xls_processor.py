@@ -4,12 +4,11 @@ import argparse
 import json
 import math
 import re
+import xlrd
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
-
-import xlrd
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from xlrd.xldate import XLDateError
 
@@ -347,7 +346,7 @@ def _load(
     return data
 
 
-def parse_yields(
+def process_xls(
     src_dir: str | Path | None = None,
     round_digits: int | None = None,
 ) -> dict[str, Any]:
@@ -387,7 +386,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    data = parse_yields(src_dir=args.src_dir, round_digits=args.round_digits)
+    data = process_xls(src_dir=args.src_dir, round_digits=args.round_digits)
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 

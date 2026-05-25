@@ -1,16 +1,15 @@
 import sys
-from selenium.common.exceptions import TimeoutException
-from nn_euro_yields import download_yields
-
+from data_wrangler import wrangle
+from db import drop, create, insert, query_all
 
 def main():
     try:
-        path = download_yields(append_timestamp=True)
-    except (TimeoutError, TimeoutException) as exc:
-        print(f"Download failed: {exc}", file=sys.stderr)
-        raise SystemExit(1) from None
-    print(path)
-
+        data = wrangle(src_dir='data', round_digits=4)
+        drop()
+        create()
+        insert(data)
+    except Exception as e:
+        print(f"An error occurred: {e}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
