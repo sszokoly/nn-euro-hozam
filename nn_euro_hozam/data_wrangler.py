@@ -1,4 +1,4 @@
-from xls_processor import main, process_xls
+from xls_processor import process_xls
 from color_logger import logger
 
 def wrangle(src_dir="data", round_digits=4) -> list:

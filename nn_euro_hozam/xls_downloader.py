@@ -1,7 +1,5 @@
 import argparse
 import asyncio
-import logging
-import time
 from datetime import date, timedelta
 from web_scraper import download_yields_xls
 from color_logger import logger
@@ -141,8 +139,8 @@ async def main():
 if __name__ == "__main__":
     import sys
     sys.argv.extend([
-        "--start-date", "2026-05-01",
-        "--end-date", "2026-05-02",
+        "--start-date", "2025-12-01",
+        "--end-date", "2025-12-21",
         "--interval", "daily",
         "--outfile-path", "data/",
         "--retries", "20",
