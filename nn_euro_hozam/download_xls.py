@@ -1,12 +1,14 @@
-from __future__ import annotations
+#!/usr/bin/env python3
 
-import argparse
 import shutil
 import tempfile
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from loguru import logger
 from pathlib import Path
+from random import randint
+from typing import Generator
 
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
@@ -24,6 +26,43 @@ PRODUCT_VALUE = "31866"
 
 DEFAULT_TIMEOUT_SECONDS = 30
 DOWNLOAD_TIMEOUT_SECONDS = 60
+
+
+def _generate_start_end_dates(
+    start_date: str,
+    end_date: str,
+    interval: str = "daily"
+) -> Generator[tuple[str, str], None, None]:
+    incr = timedelta(days=1) if interval == "daily" else timedelta(weeks=1)
+    
+    try:
+        start = date.fromisoformat(start_date)
+    except ValueError:
+        logger.opt(colors=True).error(f"Invalid start date or format: <yellow>{start_date}</yellow>")
+        return
+
+    if start == date.today():
+        logger.opt(colors=True).error(f"Start date cannot be today: <yellow>{start_date}</yellow>")
+        return
+    
+    try:
+        end = date.fromisoformat(end_date)
+    except ValueError:
+        logger.opt(colors=True).error(f"Invalid end date or format: <yellow>{end_date}</yellow>")
+        return
+    
+    if end > date.today():
+        logger.opt(colors=True).error(f"End date cannot be in the future: <yellow>{end_date}</yellow>")
+        return
+
+    if start > end:
+        logger.opt(colors=True).error(f"Start date cannot be after end date: <yellow>{start_date}</yellow> > <yellow>{end_date}</yellow>")
+        return
+    
+    while start < date.fromisoformat(end_date):
+        end = start + incr
+        yield start.isoformat(), end.isoformat()
+        start += incr
 
 
 class Selectors:
@@ -325,7 +364,7 @@ def _resolve_outfile_path(
     return destination
 
 
-def download_yields_xls(
+def download_xls(
     start_date: date | datetime | str | None = None,
     end_date: date | datetime | str | None = None,
     outfile_path: str | Path | None = None,
@@ -404,24 +443,82 @@ def download_yields_xls(
     return destination
 
 
-def _parse_args() -> argparse.Namespace:
+def download_multiple_xls(
+    start_date: str,
+    end_date: str,
+    interval: str = "daily",
+    retries: int = 20,
+    min_sleep_secs: int = 30,
+    outfile_path: Path = None,
+    append_timestamp: bool = True,
+):
+
+    outfile_path = Path(outfile_path).resolve() if outfile_path else Path.cwd()
+
+    for start, end in _generate_start_end_dates(start_date, end_date, interval):
+        if start != start_date:
+            time.sleep(min_sleep_secs)
+
+        attempt = 0
+        while attempt < retries:
+            start_end = f"{start} - {end}"
+            try:
+                logger.opt(colors=True).info(f"Download attempt for {start_end} to <yellow>{outfile_path}</yellow>")
+                output_path = download_xls(
+                    start_date=start,
+                    end_date=end,
+                    outfile_path=outfile_path,
+                    append_timestamp=append_timestamp
+                )
+                logger.opt(colors=True).info(f"Download <green>success</green> for {start_end} to <yellow>{output_path}</yellow> - sleep <cyan>{min_sleep_secs}</cyan> secs")
+                break
+            except Exception as exc:
+                logger.opt(colors=True).debug(f"Exception during download for {start_end}: <red>{exc}</red>")
+                attempt += 1
+                if attempt < retries:
+                    sleep_sec = min_sleep_secs + randint(1, min_sleep_secs)
+                    logger.opt(colors=True).error(f"Download <red>failed</red>  for {start_end} on attempt <cyan>{attempt}</cyan> - sleep <cyan>{sleep_sec:>3}</cyan> secs...")
+                    time.sleep(sleep_sec)
+                else:
+                    logger.opt(colors=True).error(f"Download <red>failed</red>  for {start_end} after <cyan>{retries}</cyan> attempts.")
+                    
+
+if __name__ == "__main__":
+    from logger_config import setup_logging
+    setup_logging()
+    from loguru import logger
+    import argparse
+
     parser = argparse.ArgumentParser(
-        description="Download NN Euro Alap rendszeres díjas yield spreadsheet."
+        description="Download NN Euro Alap rendszeres díjas yield spreadsheets."
     )
     parser.add_argument(
         "--start-date",
+        type=str,
+        default=(date.today() - timedelta(days=2)).isoformat(),
         required=False,
-        help="Start date as ISO date, for example 2026-05-10.\
-              Defaults to seven days before end date.",
+        help="Start date as ISO date, for example '2026-05-10'.\
+              Defaults to the day before yesterday.",
     )
     parser.add_argument(
         "--end-date",
+        type=str,
+        default=date.today().isoformat(),
         required=False,
-        help="End date as ISO date, for example 2026-05-17.\
-              Defaults to yesterday.",
+        help="End date as ISO date, for example '2026-05-17'.\
+              Defaults to today.",
+    )
+    parser.add_argument(
+        "--interval",
+        required=False,
+        default="daily",
+        help="Interval for downloading yields, 'daily' or 'weekly'.\
+              Defaults to 'daily'.",
     )
     parser.add_argument(
         "--outfile-path",
+        type=Path,
+        default=Path("data/xls/"),
         required=False,
         help="Destination file path, including folder and filename.\
               Defaults to the browser-provided filename in the current directory.",
@@ -433,19 +530,29 @@ def _parse_args() -> argparse.Namespace:
         required=False,
         help="Append a timestamp to the output filename.",
     )
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = _parse_args()
-    output_path = download_yields_xls(
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=20,
+        required=False,
+        help="Number of retry attempts for downloading yields.",
+    )
+    parser.add_argument(
+        "--min-sleep-secs",
+        type=int,
+        default=30,
+        required=False,
+        help="Minimum number of seconds to sleep between retry attempts.",
+    )
+    args = parser.parse_args()
+    
+    output_path = download_multiple_xls(
         start_date=args.start_date,
         end_date=args.end_date,
+        interval=args.interval,
+        retries=args.retries,
+        min_sleep_secs=args.min_sleep_secs,
         outfile_path=args.outfile_path,
-        append_timestamp=args.append_timestamp,
+        append_timestamp=args.append_timestamp
     )
     print(output_path)
-
-
-if __name__ == "__main__":
-    main()

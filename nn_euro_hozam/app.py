@@ -11,50 +11,76 @@ import streamlit as st
 import sys
 from db import Database
 from loguru import logger
-from data_processor import xls_to_db_data
-from df_processor import db_to_df_data
+from data_processor import get_df_from_db
 from pathlib import Path
 
 
 TABLE = "nn_euro_yields"
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_DIR = BASE_DIR / "db"
-DB = DB_DIR /  f"{TABLE}.db"
-DF_DIR = BASE_DIR / "csv"
+BASE_DIR = Path.cwd()
+DB_DIR = BASE_DIR / "data" / "db"
+DB = DB_DIR / f"{TABLE}.db"
+XLS_DIR = BASE_DIR / "data" / "xls"
+CSV_DIR = BASE_DIR / "data" / "csv"
 
 
-def _parse_args() -> argparse.Namespace:
+def main(args=None):
+    logger.info("Starting the application...")
+    try:
+        if args is None:
+            logger.warning("No arguments provided, using default values.")
+            args = argparse.Namespace(
+                db=DB,
+                table=TABLE,
+                src_dir=XLS_DIR,
+                round_digits=4,
+                init_db=True
+            )
+
+        df = get_df_from_db(
+            db=args.db,
+            table=args.table,
+            src_dir=args.src_dir,
+            round_digits=args.round_digits,
+            init_db=args.init_db,
+        )
+        df.to_csv(CSV_DIR / "nn_euro_yields.csv", index=False)
+        logger.info("Application finished successfully.")
+        
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Visualize NN Euro investment asset yield data."
     )
     parser.add_argument(
-        "--init",
+        "--init-db",
         action="store_true",
         default=True,
         required=False,
-        help="Drop and recreate the database table.",
+        help="Initialize database and process all data.",
     )
     parser.add_argument(
         "--db",
         required=False,
-        type=str,
-        default=None,
-        help="Database file path",
+        type=Path,
+        default=DB,
+        help=f"DB file path, defaults to {DB}",
     )
     parser.add_argument(
         "--table",
         type=str,
         default=None,
         required=False,
-        help="Database table name",
-
+        help=f"DB TABLE name, defaults to {TABLE}",
     )
     parser.add_argument(
         "--src-dir",
-        type=str,
-        default="data",
+        type=Path,
+        default=XLS_DIR,
         required=False,
-        help="Folder containing the source yield spreadsheets. Defaults to 'data'.",
+        help=f"Folder containing the yield spreadsheets. Defaults to {XLS_DIR}.",
     )
     parser.add_argument(
         "--round-digits",
@@ -63,37 +89,5 @@ def _parse_args() -> argparse.Namespace:
         required=False,
         help="Optionally round parsed float values to this many decimal places.",
     )
-    return parser.parse_args()
-
-
-def main():
-    logger.info("Starting the application...")
-    try:
-        args = _parse_args()
-        
-        # Initialize database
-        db = Database(db=args.db, table=args.table)
-        if args.init:
-            db.drop()
-            db.create()
-        
-        # Insert processed data into the database
-        db_in_data = xls_to_db_data(src_dir=args.src_dir, round_digits=args.round_digits)
-        db.insert(db_in_data)
-        
-        # Fetch all DB data and convert to DataFrame for visualization
-        df = db_to_df_data(db.fetchall())
-        df.to_csv(DF_DIR / "nn_euro_yields.csv", index=False)
-        
-        logger.info("Application finished successfully.")
-        
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
-
-
-if __name__ == "__main__":
-    import sys
-    sys.argv.extend([
-        "--init",
-    ])
-    main()
+    args = parser.parse_args()
+    main(args=args)

@@ -1,9 +1,7 @@
-from __future__ import annotations
-
-import argparse
 import json
 import math
 import re
+from numpy import void
 import xlrd
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -320,61 +318,61 @@ def _load(
     workbook = xlrd.open_workbook(path, formatting_info=True)
     data: dict[str, dict[str, list[dict[str, str | float | None]]]] = {}
 
-    for sheet in workbook.sheets():
-        indexes = _header_indexes(workbook, sheet)
-        rows: list[dict[str, str | float | None]] = []
+    sheet = workbook.sheet_by_index(0)
+    indexes = _header_indexes(workbook, sheet)
+    rows: list[dict[str, str | float | None]] = []
 
-        for row_index in range(DATA_START_ROW_INDEX, sheet.nrows):
-            row = {
-                field_name: _read_cell(workbook, sheet, row_index, column_index)
-                for field_name, column_index in indexes.items()
+    for row_index in range(DATA_START_ROW_INDEX, sheet.nrows):
+        row = {
+            field_name: _read_cell(workbook, sheet, row_index, column_index)
+            for field_name, column_index in indexes.items()
+        }
+        row.update(
+            {
+                field_name: CellValue(None)
+                for field_name in FIELD_NAMES
+                if field_name not in row
             }
-            row.update(
-                {
-                    field_name: CellValue(None)
-                    for field_name in FIELD_NAMES
-                    if field_name not in row
-                }
-            )
+        )
 
-            if _is_empty_row(row):
-                break
+        if _is_empty_row(row):
+            break
 
-            rows.append(_coerce_row(row, round_digits))
+        rows.append(_coerce_row(row, round_digits))
 
-        data[sheet.name] = {"data": rows}
+    data[sheet.name] = rows
 
     return data
 
 
-def process_xls(
-    src_dir: str | Path | None = None,
+def xls_to_dict(
+    filename: Path,
     round_digits: int | None = None,
 ) -> dict[str, Any]:
-    if round_digits is not None and round_digits < 0:
-        raise ValueError("round_digits must be non-negative")
 
-    src_path = Path(src_dir).expanduser() if src_dir is not None else Path.cwd()
-    if not src_path.is_dir():
-        raise NotADirectoryError(f"Source directory does not exist: {src_path}")
+    filename = filename.resolve()
+    if not filename.is_file():
+        raise FileNotFoundError(f"Source file '{filename}' does not exist")
+
+    if round_digits is not None and round_digits < 0:
+        raise ValueError("Argument 'round_digits' must be non-negative")
 
     data: dict[str, Any] = {}
-    for path in sorted(src_path.iterdir()):
-        if path.is_file() and path.suffix.lower() == ".xls":
-            logger.opt(colors=True).debug(f"Processing file: <yellow>{path.name}</yellow>")
-            data[path.name] = _load(path, round_digits)
-
+    data[filename.name] = _load(filename, round_digits)
     return data
 
 
-def _parse_args() -> argparse.Namespace:
+if __name__ == "__main__":
+    import argparse
+
     parser = argparse.ArgumentParser(
-        description="Parses NN Euro Alap yield spreadsheets."
+        description="Parses NN Euro Alap yield spreadsheet."
     )
     parser.add_argument(
-        "--src-dir",
+        "--filename",
+        type=Path,
         required=False,
-        help="Folder containing the source yield spreadsheets. Defaults to cwd.",
+        help="Path to the source yield spreadsheet.",
     )
     parser.add_argument(
         "--round-digits",
@@ -383,14 +381,8 @@ def _parse_args() -> argparse.Namespace:
         default=4,
         help="Optionally round parsed float values to this many decimal places.",
     )
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = _parse_args()
-    data = process_xls(src_dir=args.src_dir, round_digits=args.round_digits)
+    args = parser.parse_args()
+    if not args.filename:
+        args.filename = Path.cwd() / "data" / "test" / "test.xls"
+    data = xls_to_dict(filename=args.filename, round_digits=args.round_digits)
     print(json.dumps(data, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    main()
