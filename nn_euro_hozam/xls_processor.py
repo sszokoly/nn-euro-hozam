@@ -7,9 +7,10 @@ import re
 import xlrd
 from dataclasses import dataclass
 from datetime import date, datetime
+from loguru import logger
 from pathlib import Path
-from typing import Any
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from typing import Any
 from xlrd.xldate import XLDateError
 
 
@@ -360,6 +361,7 @@ def process_xls(
     data: dict[str, Any] = {}
     for path in sorted(src_path.iterdir()):
         if path.is_file() and path.suffix.lower() == ".xls":
+            logger.opt(colors=True).debug(f"Processing file: <yellow>{path.name}</yellow>")
             data[path.name] = _load(path, round_digits)
 
     return data

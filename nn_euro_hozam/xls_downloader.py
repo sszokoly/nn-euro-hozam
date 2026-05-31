@@ -2,10 +2,9 @@ import argparse
 import asyncio
 from datetime import date, timedelta
 from web_scraper import download_yields_xls
-from color_logger import logger
 from random import randint
 from typing import Generator
-
+from loguru import logger
 
 def _generate_start_end_dates(
     start_date: str,
@@ -49,14 +48,17 @@ async def download(
     end_date: str,
     interval: str = "daily",
     retries: int = 20,
-    min_sleep_secs: int = 60,
+    min_sleep_secs: int = 30,
     outfile_path: str = "data/",
 ):
 
     for start, end in _generate_start_end_dates(start_date, end_date, interval):
-        start_end = f"#y<{start}> - #y<{end}>"
+        if start != start_date:
+            await asyncio.sleep(min_sleep_secs)
+
         attempt = 0
         while attempt < retries:
+            start_end = f"#y<{start}> - #y<{end}>"
             try:
                 output_path = await asyncio.to_thread(
                     download_yields_xls,
@@ -65,18 +67,17 @@ async def download(
                     append_timestamp=True,
                     outfile_path=outfile_path
                 )
-                logger.info(f"Download #g<success> for {start_end} to #y<{output_path}> - sleep #c<{min_sleep_secs}> secs...")
-                await asyncio.sleep(min_sleep_secs)
+                logger.opt(colors=True).info(f"Download <green>success</green> for {start_end} to <yellow>{output_path}</yellow> - sleep <cyan>{min_sleep_secs}</cyan> secs")
                 break
             except Exception as exc:
                 logger.debug(f"Exception during download for {start_end}: {exc}")
                 attempt += 1
                 if attempt < retries:
                     sleep_sec = min_sleep_secs + randint(1, min_sleep_secs)
-                    logger.error(f"Download #r<failed>  for {start_end} on attempt #c<{attempt}> - sleep #c<{sleep_sec:>3}> secs...")
+                    logger.error(f"Download <red>failed</red>  for {start_end} on attempt <cyan>{attempt}</cyan> - sleep <cyan>{sleep_sec:>3}</cyan> secs...")
                     await asyncio.sleep(sleep_sec)
                 else:
-                    logger.error(f"Download #r<failed>  for {start_end} after #c<{retries}> attempts.")
+                    logger.error(f"Download <red>failed</red>  for {start_end} after <cyan>{retries}</cyan> attempts.")
                     
 
 def _parse_args() -> argparse.Namespace:
@@ -119,7 +120,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-sleep-secs",
         type=int,
-        default=60,
+        default=30,
         required=False,
         help="Minimum number of seconds to sleep between retry attempts.",
     )
@@ -139,11 +140,11 @@ async def main():
 if __name__ == "__main__":
     import sys
     sys.argv.extend([
-        "--start-date", "2025-12-01",
-        "--end-date", "2025-12-21",
+        "--start-date", "2025-09-01",
+        "--end-date", "2025-09-10",
         "--interval", "daily",
         "--outfile-path", "data/",
         "--retries", "20",
-        "--min-sleep-secs", "60",
+        "--min-sleep-secs", "30",
     ])
     asyncio.run(main())
