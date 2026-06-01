@@ -7,12 +7,13 @@ setup_logging()
 
 import argparse
 import pandas as pd
-import streamlit as st
 import sys
 from db import Database
 from loguru import logger
 from data_processor import get_df_from_db
 from pathlib import Path
+
+import streamlit as st
 
 
 TABLE = "nn_euro_yields"
@@ -21,6 +22,7 @@ DB_DIR = BASE_DIR / "data" / "db"
 DB = DB_DIR / f"{TABLE}.db"
 XLS_DIR = BASE_DIR / "data" / "xls"
 CSV_DIR = BASE_DIR / "data" / "csv"
+ST_PAGES_DIR = BASE_DIR / "nn_euro_hozam" / "pages"
 
 
 def main(args=None):
@@ -43,8 +45,20 @@ def main(args=None):
             round_digits=args.round_digits,
             init_db=args.init_db,
         )
-        df.to_csv(CSV_DIR / "nn_euro_yields.csv", index=False)
-        logger.info("Application finished successfully.")
+        if args.init_db:
+            df.to_csv(CSV_DIR / "nn_euro_yields.csv", index=True)
+        
+        
+        # Initialize the DataFrame in session state once
+        if "df" not in st.session_state:
+            st.session_state.df = df
+        
+        st.set_page_config(layout="wide")
+        pg = st.navigation([
+            st.Page(ST_PAGES_DIR / "01_setup.py", title="Setup", icon="⚙️"),
+            st.Page(ST_PAGES_DIR / "02_visualize.py", title="Data Visualization", icon="📊"),
+        ])
+        pg.run()
         
     except Exception as e:
         logger.error(f"An error occurred: {e}")

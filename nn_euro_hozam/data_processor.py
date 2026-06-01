@@ -39,15 +39,16 @@ def get_df_from_db(
         xls_data = import_xls_data(src_dir=src_dir, round_digits=round_digits)
         db.insert(xls_data)
         db.backup()
+
     data = db.fetchall()
     df = pd.DataFrame.from_records(
         data,
         columns=["id", "asset_name", "date", "opening_value", "closing_value", "period_yield"]
     )
-    df = df.drop(columns=["id"])
-    df = df.set_index('date')
+    #df = df.drop(columns=["id"])
+    df = df.set_index('id')
     df = df.sort_index()
-    df.index = pd.to_datetime(df.index)
+    #df.index = pd.to_datetime(df.index)
     return df
 
 
