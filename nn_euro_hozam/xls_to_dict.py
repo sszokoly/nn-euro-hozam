@@ -314,10 +314,10 @@ def _coerce_row(
 def _load(
     path: Path,
     round_digits: int | None,
-) -> dict[str, dict[str, list[dict[str, str | float | None]]]]:
+) -> tuple[str, list[dict[str, str | float | None]]]:
     workbook = xlrd.open_workbook(path, formatting_info=True)
-    data: dict[str, dict[str, list[dict[str, str | float | None]]]] = {}
 
+    opening_date = None
     sheet = workbook.sheet_by_index(0)
     indexes = _header_indexes(workbook, sheet)
     rows: list[dict[str, str | float | None]] = []
@@ -338,11 +338,13 @@ def _load(
         if _is_empty_row(row):
             break
 
-        rows.append(_coerce_row(row, round_digits))
+        coerced_row = _coerce_row(row, round_digits)
+        rows.append(coerced_row)
+        opening_date = coerced_row.get("opening_date")
 
-    data[sheet.name] = rows
-
-    return data
+    if opening_date is None:
+        return "", []
+    return opening_date, rows
 
 
 def xls_to_dict(
@@ -357,9 +359,7 @@ def xls_to_dict(
     if round_digits is not None and round_digits < 0:
         raise ValueError("Argument 'round_digits' must be non-negative")
 
-    data: dict[str, Any] = {}
-    data[filename.name] = _load(filename, round_digits)
-    return data
+    return _load(filename, round_digits)
 
 
 if __name__ == "__main__":
@@ -383,6 +383,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     if not args.filename:
-        args.filename = Path.cwd() / "data" / "test" / "test.xls"
-    data = xls_to_dict(filename=args.filename, round_digits=args.round_digits)
-    print(json.dumps(data, ensure_ascii=False, indent=2))
+        #args.filename = Path.cwd() / "data" / "test" / "test.xls"
+        args.filename = Path.cwd() / "data" / "xls" / "NN_eszkozalap_hozamok_2025-07-06_2025-07-07.xls"
+    opening_date, rows = xls_to_dict(filename=args.filename, round_digits=args.round_digits)
+    print(f"Opening date: {opening_date}")
+    print(json.dumps(rows, ensure_ascii=False, indent=2))

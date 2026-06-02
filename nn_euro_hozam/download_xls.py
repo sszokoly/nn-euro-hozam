@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from loguru import logger
 from pathlib import Path
 from random import randint
-from typing import Generator
+from utils import generate_dates
 
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
@@ -19,6 +19,8 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+from nn_euro_hozam.utils import generate_dates
+
 
 TARGET_URL = "https://www.nn.hu/hozamszamlalo"
 PRODUCT_NAME = "Euro Alap rendszeres díjas"
@@ -26,44 +28,6 @@ PRODUCT_VALUE = "31866"
 
 DEFAULT_TIMEOUT_SECONDS = 30
 DOWNLOAD_TIMEOUT_SECONDS = 60
-
-
-def _generate_start_end_dates(
-    start_date: str,
-    end_date: str,
-    interval: str = "daily"
-) -> Generator[tuple[str, str], None, None]:
-    incr = timedelta(days=1) if interval == "daily" else timedelta(weeks=1)
-    
-    try:
-        start = date.fromisoformat(start_date)
-    except ValueError:
-        logger.opt(colors=True).error(f"Invalid start date or format: <yellow>{start_date}</yellow>")
-        return
-
-    if start == date.today():
-        logger.opt(colors=True).error(f"Start date cannot be today: <yellow>{start_date}</yellow>")
-        return
-    
-    try:
-        end = date.fromisoformat(end_date)
-    except ValueError:
-        logger.opt(colors=True).error(f"Invalid end date or format: <yellow>{end_date}</yellow>")
-        return
-    
-    if end > date.today():
-        logger.opt(colors=True).error(f"End date cannot be in the future: <yellow>{end_date}</yellow>")
-        return
-
-    if start > end:
-        logger.opt(colors=True).error(f"Start date cannot be after end date: <yellow>{start_date}</yellow> > <yellow>{end_date}</yellow>")
-        return
-    
-    while start < date.fromisoformat(end_date):
-        end = start + incr
-        yield start.isoformat(), end.isoformat()
-        start += incr
-
 
 class Selectors:
     accept_cookies_button = "#onetrust-accept-btn-handler"
@@ -455,7 +419,7 @@ def download_multiple_xls(
 
     outfile_path = Path(outfile_path).resolve() if outfile_path else Path.cwd()
 
-    for start, end in _generate_start_end_dates(start_date, end_date, interval):
+    for start, end in generate_dates(start_date, end_date, interval):
         if start != start_date:
             time.sleep(min_sleep_secs)
 

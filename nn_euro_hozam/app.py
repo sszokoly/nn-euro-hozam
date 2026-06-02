@@ -6,9 +6,6 @@ from logger_config import setup_logging
 setup_logging()
 
 import argparse
-import pandas as pd
-import sys
-from db import Database
 from loguru import logger
 from data_processor import get_df_from_db
 from pathlib import Path
@@ -48,7 +45,6 @@ def main(args=None):
         if args.init_db:
             df.to_csv(CSV_DIR / "nn_euro_yields.csv", index=True)
         
-        
         # Initialize the DataFrame in session state once
         if "df" not in st.session_state:
             st.session_state.df = df
@@ -59,7 +55,7 @@ def main(args=None):
             st.Page(ST_PAGES_DIR / "02_visualize.py", title="Data Visualization", icon="📊"),
         ])
         pg.run()
-        
+
     except Exception as e:
         logger.error(f"An error occurred: {e}")
 
