@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Generator
 from loguru import logger
 
-def generate_dates(
+
+def date_generator(
     start_date: str,
     end_date: str,
     interval: str = "daily"
@@ -15,13 +16,13 @@ def generate_dates(
         start = date.fromisoformat(start_date)
     except ValueError:
         logger.opt(colors=True).error(
-            f"Invalid start date or format: <yellow>{start_date}</yellow>"
+            f"Invalid start date <yellow>{start_date}</yellow>"
         )
         return
 
     if start == date.today():
         logger.opt(colors=True).error(
-            f"Start date cannot be today: <yellow>{start_date}</yellow>"
+            f"Start date <yellow>{start_date}</yellow> cannot be today"
         )
         return
     
@@ -29,19 +30,19 @@ def generate_dates(
         end = date.fromisoformat(end_date)
     except ValueError:
         logger.opt(colors=True).error(
-            f"Invalid end date or format: <yellow>{end_date}</yellow>"
+            f"Invalid end date <yellow>{end_date}</yellow>"
         )
         return
     
     if end > date.today():
         logger.opt(colors=True).error(
-            f"End date cannot be in the future: <yellow>{end_date}</yellow>"
+            f"End date <yellow>{end_date}</yellow> cannot be in the future"
         )
         return
 
     if start > end:
         logger.opt(colors=True).error(
-            f"Start date cannot be after end date: <yellow>{start_date}</yellow> > <yellow>{end_date}</yellow>"
+            f"Start date <yellow>{start_date}</yellow> must be before <yellow>{end_date}</yellow>"
         )
         return
     
@@ -49,3 +50,13 @@ def generate_dates(
         end = start + incr
         yield start.isoformat(), end.isoformat()
         start += incr
+
+
+if __name__ == '__main__':
+    from logger_config import setup_logging
+    setup_logging()
+    from loguru import logger
+    
+    dg = date_generator(start_date="2026-05-02", end_date="2026-05-08")
+    for start_end in dg:
+        print(start_end)

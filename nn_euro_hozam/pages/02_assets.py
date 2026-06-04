@@ -1,6 +1,13 @@
 import streamlit as st
+import time
 from streamlit_lightweight_charts import renderLightweightCharts
 import streamlit_lightweight_charts.dataSamples as data
+
+
+if "df" not in st.session_state:
+    st.error("Please import data first. Redirecting...")
+    time.sleep(2)
+    st.switch_page("01_data_source.py")
 
 assets = st.session_state.df["asset_name"].unique().tolist()
 

@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from loguru import logger
 from pathlib import Path
 from random import randint
-from utils import generate_dates
+from utils import date_generator
 
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
@@ -18,8 +18,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-
-from nn_euro_hozam.utils import generate_dates
 
 
 TARGET_URL = "https://www.nn.hu/hozamszamlalo"
@@ -419,7 +417,7 @@ def download_multiple_xls(
 
     outfile_path = Path(outfile_path).resolve() if outfile_path else Path.cwd()
 
-    for start, end in generate_dates(start_date, end_date, interval):
+    for start, end in date_generator(start_date, end_date, interval):
         if start != start_date:
             time.sleep(min_sleep_secs)
 

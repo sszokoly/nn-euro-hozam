@@ -45,25 +45,6 @@ class Database():
         self.conn.commit()
         self.conn.close()
 
-    def drop(self):
-        if not Path(self.db).exists():
-            logger.opt(colors=True).warning(f"DB <yellow>{self.name}</yellow> doesn't exist. Skipping DROP...")
-            return
-        
-        if self.conn:
-            self.conn.close()
-        
-        self.conn = sqlite3.connect(self.db)
-        self.cursor = self.conn.cursor()
-        if self._table_exists():
-            logger.opt(colors=True).info(f"<red>Dropping</red> TABLE <cyan>{self.table}</cyan>")
-            self.cursor.execute(f'DROP TABLE IF EXISTS {self.table}')
-            self.conn.commit()
-        else:
-            logger.opt(colors=True).warning(f"TABLE <cyan>{self.table}</cyan> doesn't exist. Skipping DROP...")
-        
-        self.conn.close()
-
     def insert(self, data):
         if not Path(self.db).exists():
             logger.opt(colors=True).warning(f"DB <yellow>{self.name}</yellow> doesn't exist. Skipping INSERT...")
@@ -96,7 +77,7 @@ class Database():
         self.conn = sqlite3.connect(self.db)
         self.cursor = self.conn.cursor()
         if self._table_exists():
-            logger.opt(colors=True).info(f"<green>Querying</green> data from TABLE <cyan>{self.table}</cyan>")
+            logger.opt(colors=True).info(f"<green>Fetching</green> all data from TABLE <cyan>{self.table}</cyan>")
             self.cursor.execute(f'SELECT * FROM {self.table}')
             results = self.cursor.fetchall()
         else:
@@ -105,6 +86,65 @@ class Database():
 
         self.conn.close()
         return results
+
+    def fetch_by_date(self, opening_date):
+        if not Path(self.db).exists():
+            logger.opt(colors=True).warning(f"DB <yellow>{self.name}</yellow> doesn't exist. Skipping FETCH...")
+            return
+        
+        if self.conn:
+            self.conn.close()
+        
+        self.conn = sqlite3.connect(self.db)
+        self.cursor = self.conn.cursor()
+        if self._table_exists():
+            logger.opt(colors=True).info(f"<green>Fetching</green> data for date <yellow>{opening_date}</yellow> from TABLE <cyan>{self.table}</cyan>")
+            self.cursor.execute(f'SELECT * FROM {self.table} WHERE date = ?', (opening_date,))
+            results = self.cursor.fetchall()
+        else:
+            logger.opt(colors=True).warning(f"TABLE <cyan>{self.table}</cyan> doesn't exist. Skipping FETCH...")
+            results = []
+
+        self.conn.close()
+        return results
+
+    def dropall(self):
+        if not Path(self.db).exists():
+            logger.opt(colors=True).warning(f"DB <yellow>{self.name}</yellow> doesn't exist. Skipping DROP...")
+            return
+        
+        if self.conn:
+            self.conn.close()
+        
+        self.conn = sqlite3.connect(self.db)
+        self.cursor = self.conn.cursor()
+        if self._table_exists():
+            logger.opt(colors=True).info(f"<red>Dropping</red> TABLE <cyan>{self.table}</cyan>")
+            self.cursor.execute(f'DROP TABLE IF EXISTS {self.table}')
+            self.conn.commit()
+        else:
+            logger.opt(colors=True).warning(f"TABLE <cyan>{self.table}</cyan> doesn't exist. Skipping DROP...")
+        
+        self.conn.close()
+
+    def delete_by_date(self, opening_date):
+        if not Path(self.db).exists():
+            logger.opt(colors=True).warning(f"DB <yellow>{self.name}</yellow> doesn't exist. Skipping DELETE...")
+            return
+        
+        if self.conn:
+            self.conn.close()
+        
+        self.conn = sqlite3.connect(self.db)
+        self.cursor = self.conn.cursor()
+        if self._table_exists():
+            logger.opt(colors=True).info(f"<red>Deleting</red> <yellow>{opening_date}</yellow> from TABLE <cyan>{self.table}</cyan>")
+            self.cursor.execute(f'DELETE FROM {self.table} WHERE date = ?', (opening_date,))
+            self.conn.commit()
+        else:
+            logger.opt(colors=True).warning(f"TABLE <cyan>{self.table}</cyan> doesn't exist. Skipping DELETE...")
+        
+        self.conn.close()
 
     def backup(self):
         db_path = Path(self.db).resolve()
@@ -133,7 +173,7 @@ if __name__ == '__main__':
     setup_logging()
     from loguru import logger
 
-    db = Database(db='test.db', table="test", init_db=False)
+    db = Database(db='test.db', table="test", init_db=True)
     data = [
         {
             'asset_name': 'Asset A',
@@ -150,7 +190,7 @@ if __name__ == '__main__':
         },
     ]
     db.insert(data)
-    results = db.fetchall()
+    results = db.fetch_by_date('2024-01-01')
     print(results)
     db.backup()
     

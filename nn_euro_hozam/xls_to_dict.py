@@ -341,25 +341,26 @@ def _load(
         coerced_row = _coerce_row(row, round_digits)
         rows.append(coerced_row)
         opening_date = coerced_row.get("opening_date")
+        closing_date = coerced_row.get("closing_date")
 
     if opening_date is None:
-        return "", []
-    return opening_date, rows
+        return "", "", []
+    return opening_date, closing_date, rows
 
 
 def xls_to_dict(
-    filename: Path,
+    filepath: Path,
     round_digits: int | None = None,
 ) -> dict[str, Any]:
 
-    filename = filename.resolve()
-    if not filename.is_file():
-        raise FileNotFoundError(f"Source file '{filename}' does not exist")
+    filepath = filepath.resolve()
+    if not filepath.is_file():
+        raise FileNotFoundError(f"Source file '{filepath}' does not exist")
 
     if round_digits is not None and round_digits < 0:
         raise ValueError("Argument 'round_digits' must be non-negative")
 
-    return _load(filename, round_digits)
+    return _load(filepath, round_digits)
 
 
 if __name__ == "__main__":
