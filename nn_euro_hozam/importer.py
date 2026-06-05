@@ -85,7 +85,12 @@ def import_from_xls(src_dir=XLS_DIR, round_digits=4, db=DB):
     data = database.fetchall()
     df = pd.DataFrame(data, columns=["id", "asset_name", "date",
         "opening_value", "closing_value", "period_yield"])
-    df.to_csv(CSV_DIR / "nn_euro_yields.csv", index=False)   
+    df["cumulative_yield_pct"] = (
+        df.sort_values(["asset_name", "date"])
+          .groupby("asset_name")["period_yield"]
+          .transform(lambda x: (1 + x).cumprod() - 1) * 100
+    )
+    df.to_csv(CSV_DIR / "nn_euro_yields.csv", index=False)
     return df
 
 

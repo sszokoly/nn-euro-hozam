@@ -32,7 +32,7 @@ for asset in selected_assets:
     chart_df = st.session_state.df.loc[
         st.session_state.df['asset_name'] == asset, 
         ['date', 'opening_value']
-    ].rename(columns={'date': 'time', 'period_yield': 'value'})
+    ].rename(columns={'date': 'time', 'opening_value': 'value'})
     
     chart_df['time'] = chart_df['time'].astype(str)
     chart_df = chart_df.sort_values(by='time').reset_index(drop=True)
