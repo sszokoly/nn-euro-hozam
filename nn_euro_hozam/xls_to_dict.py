@@ -45,9 +45,9 @@ class YieldRow(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     asset_name: str | None = None
-    opening_date: str | None = None
+    opening_date: date | None = None
     opening_value: float | None = None
-    closing_date: str | None = None
+    closing_date: date | None = None
     closing_value: float | None = None
     period_yield: float | None = None
 
@@ -88,16 +88,16 @@ def _coerce_text(value: Any) -> str | None:
     return text or None
 
 
-def _coerce_date(value: Any) -> str | None:
+def _coerce_date(value: Any) -> datetime | None:
     raw_value = _unwrap_cell(value)
     if raw_value is None:
         return None
 
     if isinstance(raw_value, datetime):
-        return raw_value.date().isoformat()
+        return raw_value.date()
 
     if isinstance(raw_value, date):
-        return raw_value.isoformat()
+        return raw_value
 
     if isinstance(raw_value, str):
         text = raw_value.strip()
@@ -110,17 +110,15 @@ def _coerce_date(value: Any) -> str | None:
         )
         if hungarian_match:
             year, month, day = (int(part) for part in hungarian_match.groups())
-            return date(year, month, day).isoformat()
+            return date(year, month, day)
 
-        try:
-            return date.fromisoformat(text).isoformat()
-        except ValueError:
-            pass
-
-        try:
-            return datetime.fromisoformat(text).date().isoformat()
-        except ValueError as exc:
-            raise ValueError("invalid date") from exc
+        regular_match = re.fullmatch(
+            r"(\d{4})-(\d{1,2})-(\d{1,2})",
+            text,
+        )
+        if regular_match:
+            year, month, day = (int(part) for part in hungarian_match.groups())
+            return date(year, month, day)
 
     raise ValueError("invalid date")
 
@@ -344,7 +342,7 @@ def _load(
         closing_date = coerced_row.get("closing_date")
 
     if opening_date is None:
-        return "", "", []
+        return None, None, None
     return opening_date, closing_date, rows
 
 
@@ -370,7 +368,7 @@ if __name__ == "__main__":
         description="Parses NN Euro Alap yield spreadsheet."
     )
     parser.add_argument(
-        "--filename",
+        "--filepath",
         type=Path,
         required=False,
         help="Path to the source yield spreadsheet.",
@@ -383,9 +381,9 @@ if __name__ == "__main__":
         help="Optionally round parsed float values to this many decimal places.",
     )
     args = parser.parse_args()
-    if not args.filename:
-        #args.filename = Path.cwd() / "data" / "test" / "test.xls"
-        args.filename = Path.cwd() / "data" / "xls" / "NN_eszkozalap_hozamok_2025-07-06_2025-07-07.xls"
-    opening_date, rows = xls_to_dict(filename=args.filename, round_digits=args.round_digits)
+    if not args.filepath:
+        #args.filepath = Path.cwd() / "data" / "test" / "test.xls"
+        args.filepath = Path.cwd() / "data" / "xls" / "NN_eszkozalap_hozamok_2025-06-02_2025-06-03.xls"
+    opening_date, closing_date, rows = xls_to_dict(filepath=args.filepath, round_digits=args.round_digits)
     print(f"Opening date: {opening_date}")
-    print(json.dumps(rows, ensure_ascii=False, indent=2))
+    print(rows)

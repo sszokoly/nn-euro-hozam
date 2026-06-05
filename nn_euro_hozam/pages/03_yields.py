@@ -32,12 +32,11 @@ for asset in selected_assets:
     chart_df = st.session_state.df.loc[
         st.session_state.df['asset_name'] == asset, 
         ['date', 'opening_value']
-    ].rename(columns={'date': 'time', 'opening_value': 'value'})
+    ].rename(columns={'date': 'time', 'period_yield': 'value'})
     
     chart_df['time'] = chart_df['time'].astype(str)
     chart_df = chart_df.sort_values(by='time').reset_index(drop=True)
     data = chart_df.to_dict('records')
-    data = data[:10]
     
     logger.opt(colors=True).info(f"Chart data for <yellow>{asset}</yellow>: <cyan>{len(data)}</cyan> rows")
     logger.opt(colors=True).info(f"<cyan>{data}</cyan>")

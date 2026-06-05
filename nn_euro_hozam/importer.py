@@ -24,7 +24,7 @@ def coerce_data(data) -> list:
     for record in data:
         coerced_data.append(({
             "asset_name": record["asset_name"],
-            "date": record["opening_date"],
+            "date": record["opening_date"].isoformat(),
             "opening_value": record["opening_value"],
             "closing_value": record["closing_value"],
             "period_yield": record["period_yield"]
@@ -36,12 +36,11 @@ def ffill_data(data) -> list:
     ffilled_data = []
     for record in data:
         _, asset_name, opening_date, _, closing_value, _ = record
-        opening_dt = datetime.strptime(opening_date, "%Y-%m-%d")
+        opening_dt = datetime.strptime(opening_date, "%Y-%m-%d").date()
         next_dt = opening_dt + timedelta(days=1)
-        next_date = next_dt.strftime("%Y-%m-%d")
         ffilled_data.append(({
             "asset_name": asset_name,
-            "date": next_date,
+            "date": next_dt.strftime("%Y-%m-%d"),
             "opening_value": closing_value,
             "closing_value": closing_value,
             "period_yield": 0
@@ -57,21 +56,31 @@ def import_from_xls(src_dir=XLS_DIR, round_digits=4, db=DB):
     for filepath in xls_files:
         logger.opt(colors=True).debug(f"Loading <yellow>{filepath}</yellow>")
         opening_date, closing_date, data = xls_to_dict(filepath, round_digits)
-        if not data and yesterday_date is not None:
-            data = database.fetch_by_date(yesterday_date)
-            data = ffill_data(data)
-        elif opening_date == yesterday_date:
-            database.delete_by_date(opening_date)
-            continue
-        else:
+        
+        if not opening_date and not closing_date:
+            if yesterday_date:
+                data = database.fetch_by_date(yesterday_date.isoformat())
+                data = ffill_data(data)
+                database.insert(data)
+                yesterday_date += timedelta(days=1)
+            else:
+                # nothing to do, just continue
+                continue
+        
+        elif opening_date and closing_date:
+            while yesterday_date and yesterday_date < opening_date - timedelta(days=1):
+                data2 = database.fetch_by_date(yesterday_date.isoformat())
+                data2 = ffill_data(data2)
+                database.insert(data2)
+                yesterday_date += timedelta(days=1)
+        
+            if opening_date == yesterday_date:
+                database.delete_by_date(opening_date.isoformat())
+        
             data = coerce_data(data)
-        
-        database.insert(data)
-        
-        if opening_date:
+            database.insert(data)
             yesterday_date = opening_date
-        elif data:
-            yesterday_date = data[0]["date"]
+
     
     data = database.fetchall()
     df = pd.DataFrame(data, columns=["id", "asset_name", "date",
