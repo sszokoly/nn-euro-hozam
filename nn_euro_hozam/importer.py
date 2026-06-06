@@ -1,33 +1,52 @@
 #!/usr/bin/env python3
 
-from fileinput import filename
-from multiprocessing.util import debug
-
 import pandas as pd
-from loguru import logger
-from pathlib import Path
-from nn_euro_hozam.xls_to_dict import xls_to_dict
-from nn_euro_hozam.db import Database
 from datetime import datetime, timedelta
+from fileinput import filename
+from loguru import logger
+from multiprocessing.util import debug
+from pathlib import Path
+from xls_to_dict import xls_to_dict
+
+from database import Database
+from config import (
+    DB_FILE,
+    DB_NN_TABLE_NAME,
+    XLS_DIR,
+    CSV_FILE,
+    FIELD_NAMES,
+    ROUND_DIGITS
+)
 
 
-TABLE = "nn_euro_yields"
-BASE_DIR = Path.cwd()
-DB_DIR = BASE_DIR / "data" / "db"
-DB = DB_DIR / f"{TABLE}.db"
-XLS_DIR = BASE_DIR / "data" / "xls"
-CSV_DIR = BASE_DIR / "data" / "csv"
+def opening_euro_value_cumsum(df, round_digits=ROUND_DIGITS):
+    df["opening_euro_value_cumsum"] = (
+        df.groupby("asset")["opening_euro_value"]
+          .cumsum()
+          .round(decimals=round_digits)
+    )
+    return df
 
+def period_yield_pct_cumprod(df, round_digit=ROUND_DIGITS):
+    df["growth_factor"] = 1 + df["period_yield_pct"]
+    df["cumulative_growth"] = (
+        df.groupby("asset")["growth_factor"]
+          .cumprod()
+          .round(decimals=round_digit)
+    )
+    df["period_yield_pct_cumprod"] = ((df["cumulative_growth"] - 1) * 100).round(decimals=round_digit)
+    return df
 
 def coerce_data(data) -> list:
     coerced_data = []
     for record in data:
         coerced_data.append(({
-            "asset_name": record["asset_name"],
-            "date": record["opening_date"].isoformat(),
-            "opening_value": record["opening_value"],
-            "closing_value": record["closing_value"],
-            "period_yield": record["period_yield"]
+            "asset": record["asset"],
+            "opening_date": record["opening_date"].isoformat(),
+            "opening_euro_value": record["opening_euro_value"],
+            "closing_date": record["closing_date"].isoformat(),
+            "closing_euro_value": record["closing_euro_value"],
+            "period_yield_pct": record["period_yield_pct"]
         }))
     return coerced_data
 
@@ -35,22 +54,34 @@ def coerce_data(data) -> list:
 def ffill_data(data) -> list:
     ffilled_data = []
     for record in data:
-        _, asset_name, opening_date, _, closing_value, _ = record
+        _, asset, opening_date, _, _, closing_euro_value, _ = record
         opening_dt = datetime.strptime(opening_date, "%Y-%m-%d").date()
         next_dt = opening_dt + timedelta(days=1)
         ffilled_data.append(({
-            "asset_name": asset_name,
-            "date": next_dt.strftime("%Y-%m-%d"),
-            "opening_value": closing_value,
-            "closing_value": closing_value,
-            "period_yield": 0
+            "asset": asset,
+            "opening_date": next_dt.strftime("%Y-%m-%d"),
+            "opening_euro_value": closing_euro_value,
+            "closing_date": next_dt.strftime("%Y-%m-%d"),
+            "closing_euro_value": closing_euro_value,
+            "period_yield_pct": 0.0
         }))
     return ffilled_data
 
 
-def import_from_xls(src_dir=XLS_DIR, round_digits=4, db=DB):
+def data_to_dataframe(data):
+    df = pd.DataFrame(data, columns=FIELD_NAMES)
+    df = opening_euro_value_cumsum(df)
+    df = period_yield_pct_cumprod(df)
+    return df
+
+
+def import_nn_from_xls(
+    src_dir=XLS_DIR,
+    round_digits=ROUND_DIGITS,
+    db_file=DB_FILE
+):
     xls_files = sorted(Path(src_dir).rglob("*.xls"))
-    database = Database(db=DB, table=TABLE, init_db=True)
+    database = Database(db_file=db_file, nn_table=DB_NN_TABLE_NAME, init_db=True)
     yesterday_date = None
     
     for filepath in xls_files:
@@ -81,21 +112,14 @@ def import_from_xls(src_dir=XLS_DIR, round_digits=4, db=DB):
             database.insert(data)
             yesterday_date = opening_date
 
-    
     data = database.fetchall()
-    df = pd.DataFrame(data, columns=["id", "asset_name", "date",
-        "opening_value", "closing_value", "period_yield"])
-    df["cumulative_yield_pct"] = (
-        df.sort_values(["asset_name", "date"])
-          .groupby("asset_name")["period_yield"]
-          .transform(lambda x: (1 + x).cumprod() - 1) * 100
-    )
-    df.to_csv(CSV_DIR / "nn_euro_yields.csv", index=False)
+    df = data_to_dataframe(data)
+    df.to_csv(CSV_FILE, index=False)
     return df
 
 
-def import_from_csv():
-    csv_file = CSV_DIR / "nn_euro_yields.csv"
+def import_nn_from_csv(csv_file=None):
+    csv_file = csv_file if csv_file else CSV_FILE
     if not csv_file.exists():
         logger.error(f"CSV file not found: {csv_file}")
         return None
@@ -104,18 +128,20 @@ def import_from_csv():
     return df
 
 
+def load_nn_from_db(db_file=DB_FILE):
+    database = Database(db_file=db_file, nn_table=DB_NN_TABLE_NAME, init_db=False)
+    data = database.fetchall()
+    df = data_to_dataframe(data)
+    return df
+
+
 if __name__ == '__main__':
     from logger_config import setup_logging
     setup_logging()
     from loguru import logger
-    from nn_euro_hozam.db import Database
+    from database import Database
 
-    database = Database(
-        db=Path.cwd() / "data" / "test" /"test.db",
-        table="nn_euro_yields",
-        init_db=True
-    )
-    df1 = import_from_xls(src_dir=Path.cwd() / "data" / "xls", db=database)
-    df2 = import_from_csv()
+    df1 = import_nn_from_xls(src_dir=XLS_DIR, db_file=DB_FILE)
     print("==========From XLS=========\n", df1.head(), "\n\n")
-    print("==========From CSV=========\n", df2.head(), "\n\n")
+    #df2 = import_nn_from_csv()
+    #print("==========From CSV=========\n", df2.head(), "\n\n")

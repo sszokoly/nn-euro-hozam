@@ -1,39 +1,62 @@
 import streamlit as st
-from streamlit_lightweight_charts import renderLightweightCharts
+import pandas as pd
+import plotly.graph_objects as go
+import time
 
-chartOptions = {
-    "layout": {
-        "textColor": 'black',
-        "background": {
-            "type": 'solid',
-            "color": 'white'
-        }
-    }
-}
+if "df" not in st.session_state:
+    st.error("Please import data first. Redirecting...")
+    time.sleep(1)
+    st.switch_page("pages/01_settings.py")
 
-seriesLineChart = [{
-    "type": 'Line',
-    "data": [
-        { "time": '2018-12-22', "value": 32.51 },
-        { "time": '2018-12-23', "value": 31.11 },
-        { "time": '2018-12-24', "value": 27.02 },
-        { "time": '2018-12-25', "value": 27.32 },
-        { "time": '2018-12-26', "value": 25.17 },
-        { "time": '2018-12-27', "value": 28.89 },
-        { "time": '2018-12-28', "value": 25.46 },
-        { "time": '2018-12-29', "value": 23.92 },
-        { "time": '2018-12-30', "value": 22.68 },
-        { "time": '2018-12-31', "value": 22.67 },
-        { "time": '2019-01-01', "value": 28.47 },
-    ],
-    "options": {}
-}]
 
-st.subheader("Line Chart sample")
+chart_df = st.session_state.df.loc[
+        st.session_state.df['asset'] == 'USA részvény eszközalap', 
+        ['opening_date', 'period_yield_pct_cumprod']
+    ].rename(columns={'opening_date': 'time', 'period_yield_pct_cumprod': 'value'})
 
-renderLightweightCharts([
-    {
-        "chart": chartOptions,
-        "series": seriesLineChart
-    }
-], 'line')
+
+fig = go.Figure()
+
+fig.add_trace(
+    go.Scatter(
+        x=chart_df["time"],
+        y=chart_df["value"],
+        mode="lines",
+        name="USA részvény eszközalap",
+        hovertemplate="USA részvény eszközalap<extra></extra>",
+    )
+)
+
+fig.update_layout(
+    height=800,  # increase chart height
+    hovermode="closest",
+    dragmode="pan",
+    margin=dict(l=20, r=60, t=30, b=40),
+    showlegend=True,
+
+    # Put Y scale on the right
+    yaxis=dict(
+        side="right",
+        showgrid=True,
+        title="Yield %",
+        fixedrange=True
+    ),
+
+    xaxis=dict(
+        title="Time",
+        dtick="M1",              # show one tick per month
+        tickformat="%b\n%Y",     # Jan / 2026 style labels
+        showgrid=True,
+        #rangeslider=dict(visible=True),
+    ),
+)
+
+st.plotly_chart(
+    fig,
+    use_container_width=True,
+    config={
+        "scrollZoom": True,
+        "displayModeBar": True,
+    },
+)
+

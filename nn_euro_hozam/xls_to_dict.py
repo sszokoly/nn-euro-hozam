@@ -1,7 +1,7 @@
-import json
+#!/usr/bin/env python3
+
 import math
 import re
-from numpy import void
 import xlrd
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -16,22 +16,22 @@ HEADER_ROW_INDEX = 1
 DATA_START_ROW_INDEX = 2
 
 FIELD_NAMES = (
-    "asset_name",
+    "asset",
     "opening_date",
-    "opening_value",
+    "opening_euro_value",
     "closing_date",
-    "closing_value",
-    "period_yield",
+    "closing_euro_value",
+    "period_yield_pct",
 )
 
 HEADER_MAP = {
-    "Eszközalap": "asset_name",
-    "Eszközalap neve": "asset_name",
-    "Kezdő árfolyam": "opening_value",
+    "Eszközalap": "asset",
+    "Eszközalap neve": "asset",
+    "Kezdő árfolyam": "opening_euro_value",
     "Kezdő dátum": "opening_date",
-    "Záró árfolyam": "closing_value",
+    "Záró árfolyam": "closing_euro_value",
     "Záró dátum": "closing_date",
-    "Hozam": "period_yield",
+    "Hozam": "period_yield_pct",
 }
 
 
@@ -44,16 +44,16 @@ class CellValue:
 class YieldRow(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    asset_name: str | None = None
+    asset: str | None = None
     opening_date: date | None = None
-    opening_value: float | None = None
+    opening_euro_value: float | None = None
     closing_date: date | None = None
-    closing_value: float | None = None
-    period_yield: float | None = None
+    closing_euro_value: float | None = None
+    period_yield_pct: float | None = None
 
-    @field_validator("asset_name", mode="before")
+    @field_validator("asset", mode="before")
     @classmethod
-    def _validate_asset_name(cls, value: Any) -> str | None:
+    def _validate_asset(cls, value: Any) -> str | None:
         return _coerce_text(value)
 
     @field_validator("opening_date", "closing_date", mode="before")
@@ -61,15 +61,15 @@ class YieldRow(BaseModel):
     def _validate_date(cls, value: Any) -> str | None:
         return _coerce_date(value)
 
-    @field_validator("opening_value", "closing_value", mode="before")
+    @field_validator("opening_euro_value", "closing_euro_value", mode="before")
     @classmethod
     def _validate_float(cls, value: Any) -> float | None:
         return _coerce_float(value)
 
-    @field_validator("period_yield", mode="before")
+    @field_validator("period_yield_pct", mode="before")
     @classmethod
-    def _validate_period_yield(cls, value: Any) -> float | None:
-        return _coerce_period_yield(value)
+    def _validate_period_yield_pct(cls, value: Any) -> float | None:
+        return _coerce_period_yield_pct(value)
 
 
 def _unwrap_cell(value: Any) -> Any:
@@ -143,7 +143,7 @@ def _coerce_float(value: Any) -> float | None:
     raise ValueError("invalid number")
 
 
-def _coerce_period_yield(value: Any) -> float | None:
+def _coerce_period_yield_pct(value: Any) -> float | None:
     cell = value if isinstance(value, CellValue) else CellValue(value)
     raw_value = cell.value
 
@@ -363,6 +363,8 @@ def xls_to_dict(
 
 if __name__ == "__main__":
     import argparse
+    from config import *
+    from pprint import pprint
 
     parser = argparse.ArgumentParser(
         description="Parses NN Euro Alap yield spreadsheet."
@@ -382,8 +384,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     if not args.filepath:
-        #args.filepath = Path.cwd() / "data" / "test" / "test.xls"
-        args.filepath = Path.cwd() / "data" / "xls" / "NN_eszkozalap_hozamok_2025-06-02_2025-06-03.xls"
-    opening_date, closing_date, rows = xls_to_dict(filepath=args.filepath, round_digits=args.round_digits)
-    print(f"Opening date: {opening_date}")
-    print(rows)
+        args.filepath = TMP_DIR / "test.xls"
+        #args.filepath = XLS_DIR / "NN_eszkozalap_hozamok_2025-06-06_2025-06-07.xls"
+    
+    opening_date, closing_date, rows = xls_to_dict(
+        filepath=args.filepath,
+        round_digits=args.round_digits
+    )
+    print(f"Opening date: {opening_date}  Closing date:{closing_date}")
+    pprint(rows)

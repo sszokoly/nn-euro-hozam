@@ -3,7 +3,7 @@
 
 # Setup logging before importing other modules
 from logger_config import setup_logging
-from nn_euro_hozam.db import Database
+from database import Database
 setup_logging()
 
 import argparse
@@ -26,13 +26,13 @@ ROUND_DIGITS = 4
 def main(args=None):
     
     st.set_page_config(layout="wide")
-    st.session_state.init_db = args.init_db
+    st.session_state.round_digits = args.round_digits
     
     pages = [
-        st.Page(ST_PAGES_DIR / "01_data_source.py", title="Data Source", icon="🛢", default=True),
+        st.Page(ST_PAGES_DIR / "01_settings.py", title="Settings", icon="⚙️", default=True),
         st.Page(ST_PAGES_DIR / "02_assets.py", title="Assets", icon="💰"),
-        st.Page(ST_PAGES_DIR / "03_yields.py", title="Yields", icon="📊"),
-        st.Page(ST_PAGES_DIR / "04_test.py", title="Test", icon="🚧"),
+        st.Page(ST_PAGES_DIR / "03_yields.py", title="Yields V1", icon="📊"),
+        st.Page(ST_PAGES_DIR / "04_test.py", title="Yields V2", icon="🚧"),
     ]
     pg = st.navigation(pages)
     pg.run()
@@ -41,13 +41,6 @@ def main(args=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Visualize NN Euro investment asset yield data."
-    )
-    parser.add_argument(
-        "--init-db",
-        action="store_true",
-        default=True,
-        required=False,
-        help="Initialize database and process all data.",
     )
     parser.add_argument(
         "--round-digits",

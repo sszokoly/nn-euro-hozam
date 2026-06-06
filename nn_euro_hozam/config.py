@@ -1,3 +1,50 @@
+#!/usr/bin/env python3
+
+from pathlib import Path
+
+ROUND_DIGITS = 4
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DB_DIR =  BASE_DIR / "data" / "db"
+CSV_DIR = BASE_DIR / "data" / "csv"
+XLS_DIR = BASE_DIR / "data" / "xls"
+TMP_DIR = BASE_DIR / "data" / "tmp"
+
+BASE_FILE_NAME = "nn_euro_saving_app"
+DB_FILE = DB_DIR / f"{BASE_FILE_NAME}.db"
+CSV_FILE = CSV_DIR / f"{BASE_FILE_NAME}.csv"
+DB_NN_TABLE_NAME = "nn_euro_saving"
+DB_ST_TABLE_NAME = "streamlit"
+
+
+NN_TABLE_SCHEMA = [
+    ("id", "INTEGER", "PRIMARY KEY"),
+    ("asset", "TEXT", "NOT NULL"),
+    ("opening_date", "TEXT", "NOT NULL"),
+    ("opening_euro_value", "REAL", ""),
+    ("closing_date", "TEXT", "NOT NULL"),
+    ("closing_euro_value", "REAL", ""),
+    ("period_yield_pct", "REAL", ""),
+]
+
+ST_TABLE_SCHEMA = [
+    ("id", "INTEGER", "PRIMARY KEY"),
+    ("key", "TEXT", "NOT NULL"),
+    ("value", "TEXT", "NOT NULL"),
+]
+
+FIELD_NAMES = tuple(col[0] for col in NN_TABLE_SCHEMA)
+
+HEADER_MAP = {
+    "Eszközalap": FIELD_NAMES[1],
+    "Eszközalap neve": FIELD_NAMES[1],
+    "Kezdő dátum": FIELD_NAMES[2],
+    "Kezdő árfolyam": FIELD_NAMES[3],
+    "Záró dátum": FIELD_NAMES[4],
+    "Záró árfolyam": FIELD_NAMES[5],
+    "Hozam": FIELD_NAMES[6],
+}
+
 COLORS = {
     'Aktív hozamfigyelõ vegyes eszközalap - D': '#1F77B4',  # Strong Blue
     'Euró likviditás eszközalap - D': '#FF7F0E',            # Vivid Orange
@@ -20,3 +67,8 @@ COLORS = {
     'USA részvény eszközalap': '#DBDB8D',                   # Light Yellow
     'Ázsia kötvény eszközalap': '#9EDAE5'                   # Light Cyan
 }
+
+
+if __name__ == "__main__":
+    from config import *
+    print(f"DB_FILE: {DB_FILE}")

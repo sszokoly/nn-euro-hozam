@@ -6,10 +6,10 @@ import streamlit_lightweight_charts.dataSamples as data
 
 if "df" not in st.session_state:
     st.error("Please import data first. Redirecting...")
-    time.sleep(2)
-    st.switch_page("01_data_source.py")
+    time.sleep(1)
+    st.switch_page("pages/01_settings.py")
 
-assets = st.session_state.df["asset_name"].unique().tolist()
+assets = st.session_state.df["asset"].unique().tolist()
 
 # Initialize session state
 if "available_assets" not in st.session_state:

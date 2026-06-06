@@ -225,7 +225,7 @@ src/__pycache__/
 AGENTS.md
 uv.lock
 data/xls/*
-
+data/test/*
 *.xls
 test-results/*
 launch.json
