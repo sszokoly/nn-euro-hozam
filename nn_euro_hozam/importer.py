@@ -12,6 +12,7 @@ from database import Database
 from config import (
     DB_FILE,
     DB_NN_TABLE_NAME,
+    DB_ST_TABLE_NAME,
     XLS_DIR,
     CSV_FILE,
     FIELD_NAMES,
@@ -129,10 +130,21 @@ def import_nn_from_csv(csv_file=None):
 
 
 def load_nn_from_db(db_file=DB_FILE):
-    database = Database(db_file=db_file, nn_table=DB_NN_TABLE_NAME, init_db=False)
+    database = Database(db_file=db_file, init_db=False)
     data = database.fetchall()
     df = data_to_dataframe(data)
     return df
+
+
+def backup_db(db_file=DB_FILE):
+    database = Database(db_file=db_file, init_db=False)
+    database.backup()
+
+
+def save_settings(data, db_file=DB_FILE):
+    database = Database(db_file=db_file, init_db=False)
+    #database.dropall(table_name="st")
+    database.insert(data, table_name="st")
 
 
 if __name__ == '__main__':
@@ -141,7 +153,7 @@ if __name__ == '__main__':
     from loguru import logger
     from database import Database
 
-    df1 = import_nn_from_xls(src_dir=XLS_DIR, db_file=DB_FILE)
-    print("==========From XLS=========\n", df1.head(), "\n\n")
+    df = import_nn_from_xls(src_dir=XLS_DIR, db_file=DB_FILE)
+    print("==========From XLS=========\n", df.head(), "\n\n")
     #df2 = import_nn_from_csv()
     #print("==========From CSV=========\n", df2.head(), "\n\n")

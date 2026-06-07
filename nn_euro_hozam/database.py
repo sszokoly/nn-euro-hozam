@@ -5,6 +5,7 @@ from loguru import logger
 from pathlib import Path
 from config import (
     DB_FILE,
+    DB_FILE_BKP,
     DB_NN_TABLE_NAME,
     DB_ST_TABLE_NAME,
     ST_TABLE_SCHEMA,
@@ -59,7 +60,7 @@ class Database():
                 cursor = conn.cursor()
 
                 if self._table_exists(cursor, table_name):
-                    logger.opt(colors=True).info(f"<green>Inserting</green> data into <cyan>{table}</cyan>")
+                    logger.opt(colors=True).debug(f"<green>Inserting</green> data into <cyan>{table}</cyan>")
                     column_fields = ", ".join(data[0].keys())
                     value_fields = ", ".join(f":{x}" for x in data[0].keys())
                     
@@ -131,7 +132,7 @@ class Database():
                 cursor = conn.cursor()
 
                 if self._table_exists(cursor, table_name="nn"):
-                    logger.opt(colors=True).info(f"<green>Fetching</green> data for date <yellow>{opening_date}</yellow>")
+                    logger.opt(colors=True).debug(f"<green>Fetching</green> data for date <yellow>{opening_date}</yellow>")
                     cursor.execute(f'SELECT * FROM {table} WHERE opening_date = ?', (opening_date,))
                     results = cursor.fetchall()
                 else:
@@ -156,7 +157,7 @@ class Database():
                 cursor = conn.cursor()
 
                 if self._table_exists(cursor, table_name="nn"):
-                    logger.opt(colors=True).info(f"<red>Deleting</red> <yellow>{opening_date}</yellow> from <cyan>{table}</cyan>")
+                    logger.opt(colors=True).debug(f"<red>Deleting</red> <yellow>{opening_date}</yellow> from <cyan>{table}</cyan>")
                     cursor.execute(f'DELETE FROM {table} WHERE opening_date = ?', (opening_date,))
                 else:
                     logger.opt(colors=True).warning(f"TABLE <cyan>{table}</cyan> doesn't exist")
@@ -164,19 +165,18 @@ class Database():
             except Exception as e:
                 logger.opt(colors=True).debug(f"<red>Exception</red> {e}")
 
-    def backup(self):
-        db_path = Path(self.db_file).resolve()
-        backup_path = Path(f"{self.db_file}.bkp.db").resolve()
+    def backup(self, db_file_bkp=None):
+        db_file_bkp = db_file_bkp if db_file_bkp else DB_FILE_BKP
 
-        with sqlite3.connect(db_path) as src, sqlite3.connect(backup_path) as dst:
+        with sqlite3.connect(self.db_file) as src, sqlite3.connect(db_file_bkp) as dst:
             try:
                 src.backup(dst)
-                logger.opt(colors=True).info(f"DB Backup <green>successful</green> to <yellow>{backup_path}</yellow>")
+                logger.opt(colors=True).info(f"DB Backup <green>successful</green>")
 
             except sqlite3.Error as e:
                 logger.opt(colors=True).error(f"DB Backup <red>failed</red>: {e}")
-                if backup_path.exists():
-                    backup_path.unlink()
+                if db_file_bkp.exists():
+                    db_file_bkp.unlink()
                 raise
 
     def _table_exists(self, cursor, table_name=None):
@@ -236,6 +236,5 @@ if __name__ == '__main__':
     database.insert(data)
     results = database.fetch_by_date('2024-01-01')
     print(results)
-    database.backup()
     database.delete_by_date('2024-01-01')
     database.dropall()

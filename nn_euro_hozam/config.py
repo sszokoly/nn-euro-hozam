@@ -12,6 +12,7 @@ TMP_DIR = BASE_DIR / "data" / "tmp"
 
 BASE_FILE_NAME = "nn_euro_saving_app"
 DB_FILE = DB_DIR / f"{BASE_FILE_NAME}.db"
+DB_FILE_BKP = f"{DB_FILE}.bkp.db"
 CSV_FILE = CSV_DIR / f"{BASE_FILE_NAME}.csv"
 DB_NN_TABLE_NAME = "nn_euro_saving"
 DB_ST_TABLE_NAME = "streamlit"
