@@ -136,17 +136,6 @@ def load_nn_from_db(db_file=DB_FILE):
     return df
 
 
-def backup_db(db_file=DB_FILE):
-    database = Database(db_file=db_file, init_db=False)
-    database.backup()
-
-
-def save_settings(data, db_file=DB_FILE):
-    database = Database(db_file=db_file, init_db=False)
-    #database.dropall(table_name="st")
-    database.insert(data, table_name="st")
-
-
 if __name__ == '__main__':
     from logger_config import setup_logging
     setup_logging()

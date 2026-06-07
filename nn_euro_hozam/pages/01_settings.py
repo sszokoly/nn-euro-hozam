@@ -1,15 +1,30 @@
+#!/usr/bin/env python3
+
 import streamlit as st
+import time
 from streamlit_lightweight_charts import renderLightweightCharts
 import streamlit_lightweight_charts.dataSamples as data
 from loguru import logger
-from importer import load_nn_from_db, import_nn_from_csv, import_nn_from_xls, backup_db, save_settings
-from config import DB_DIR
-from pathlib import Path
-import time
 from datetime import date, datetime
-import json
+
+from config import DB_DIR
+from database import backup_db, save_settings, load_settings
+from importer import load_nn_from_db, import_nn_from_csv, import_nn_from_xls
+from pathlib import Path
+
+
 
 db_files = sorted(Path(DB_DIR).rglob("*.db"))
+
+if "settings_loaded" not in st.session_state:
+    settings = load_settings()
+    if settings:
+        for key in settings:
+            value = settings[key]
+            setattr(st.session_state, key, value)
+            logger.opt(colors=True).debug(f"<green>Restored</green> <yellow>{key}</yellow> to <cyan>{value}</cyan>")
+        logger.opt(colors=True).info(f"<green>Restored</green> settings")
+    st.session_state.settings_loaded = True
 
 if "selected_db_file" not in st.session_state:
     st.session_state.selected_db_file = db_files[0]
@@ -25,7 +40,7 @@ def confirm_dialog(fn, msg="OK to Proceed?"):
     )
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Proceed", use_container_width=True):
+        if st.button("Proceed", width='content'):
             logger.opt(colors=True).info("Reloading")
             with st.spinner("Processing..."):
                 df = fn()
@@ -34,7 +49,7 @@ def confirm_dialog(fn, msg="OK to Proceed?"):
                     st.session_state.df = df
             st.rerun()
     with col2:
-        if st.button("Cancel", use_container_width=True):
+        if st.button("Cancel", width='content'):
             st.rerun()
 
 
@@ -51,7 +66,7 @@ if "df" not in st.session_state:
 
 st.subheader("NN Euro Data Source")
 
-col1, col2, col3, col4, col5, col6 = st.columns([6, 1.5, 0.4, 1.5, 0.4, 3])
+col1, col2, col3, col4, col5, col6 = st.columns([6, 1.4, 0.4, 1.4, 0.4, 5])
 
 with col1:
     ok = "✅" if st.session_state.df is not None else "❌"
@@ -73,7 +88,7 @@ with col2:
         </style>
     """, unsafe_allow_html=True)
     
-    if st.button("Reload from CSV", type="primary", use_container_width=True):
+    if st.button("Reload from CSV", type="primary", width='stretch'):
         confirm_dialog(import_nn_from_csv)
 
 with col4:
@@ -92,7 +107,7 @@ with col4:
         </style>
     """, unsafe_allow_html=True)
     
-    if st.button("Reload from XLS", type="secondary", use_container_width=True):
+    if st.button("Reload from XLS", type="secondary", width='stretch'):
         confirm_dialog(import_nn_from_xls)
 
 with col1:
@@ -123,7 +138,7 @@ with col2:
         </style>
     """, unsafe_allow_html=True)
     
-    if st.button("Load Database", type="tertiary", use_container_width=True):
+    if st.button("Load Database", type="tertiary", width='stretch'):
         st.session_state.df = load_nn_from_db(st.session_state.selected_db_file)
         db_file_name = st.session_state.selected_db_file.name
         logger.opt(colors=True).info(f"Loaded <yellow>{db_file_name}</yellow>")
@@ -152,7 +167,7 @@ with col4:
         </style>
     """, unsafe_allow_html=True)
     
-    if st.button("Backup Database", type="tertiary", use_container_width=True):
+    if st.button("Backup Database", type="tertiary", width='stretch'):
         backup_db()
         with col5:
             placeholder = st.empty()
@@ -174,6 +189,9 @@ st.subheader("Start/End Date")
 df_start, df_end = st.session_state.df["opening_date"].iloc[[0, -1]]
 df_start_date = datetime.strptime(df_start, "%Y-%m-%d").date()
 df_end_date = datetime.strptime(df_end, "%Y-%m-%d").date()
+restored_start_date = date.fromisoformat(st.session_state.get("start_date", df_start))
+restored_end_date = date.fromisoformat(st.session_state.get("end_date", df_end))
+
 
 col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1, 1, 3])
 
@@ -181,7 +199,7 @@ with col1:
     start_year = st.selectbox(
         "Start Year",
         options=range(df_start_date.year, df_end_date.year + 1),
-        index=0,
+        index=list(range(df_start_date.year, df_end_date.year + 1)).index(restored_start_date.year),
     )
 
 with col2:
@@ -189,7 +207,7 @@ with col2:
         "Start Month",
         options=range(1, 13),
         format_func=lambda m: date(2025, m, 1).strftime("%B"),
-        index=0,
+        index=restored_start_date.month - 1,
     )
 
 start_date = date(start_year, start_month, 1)
@@ -198,7 +216,7 @@ with col4:
     end_year = st.selectbox(
         "End Year",
         options=range(df_start_date.year, df_end_date.year + 1),
-        index=0,
+        index=list(range(df_start_date.year, df_end_date.year + 1)).index(restored_end_date.year),
     )
 
 with col5:
@@ -206,7 +224,7 @@ with col5:
         "End Month",
         options=range(1, 13),
         format_func=lambda m: date(2025, m, 1).strftime("%B"),
-        index=0,
+        index=restored_end_date.month - 1,
     )
 
 end_date = date(end_year, end_month, 1)
@@ -239,13 +257,14 @@ def add_asset():
         st.session_state.available_assets.remove(chosen)
         st.session_state.asset_percentages[chosen] = 0
     st.session_state._asset_picker = None
+    #st.rerun()
 
 def remove_asset(asset):
     st.session_state.selected_assets.remove(asset)
     st.session_state.available_assets.append(asset)
     st.session_state.available_assets.sort()
     del st.session_state.asset_percentages[asset]
-    st.rerun()
+    #st.rerun()
 
 def update_percentage(asset):
     st.session_state.asset_percentages[asset] = st.session_state[f"pct_{asset}"]
@@ -308,7 +327,7 @@ st.divider(width=1250)
 
 ################################# SAVE BLOCK ##################################
 
-col1, col2, col3 = st.columns([3, 1, 3])  
+col1, col2, col3, col4 = st.columns([8, 2, 1, 12])  
 
 if (
     "selected_assets" in st.session_state and
@@ -318,20 +337,27 @@ if (
     total == 100
 ):
     with col2:
-        if st.button("Save", use_container_width=False):
+        if st.button("Save", width='stretch'):
             data = []
             for key in (
+                "available_assets",
                 "selected_assets",
                 "asset_percentages",
                 "start_date",
                 "end_date"
             ):
                 value = st.session_state[key]
-                logger.opt(colors=True).info(f"Key='{key}' Value='{value}'")
                 data.append({
                     "key": key,
                     "value": value
                 })
-            logger.opt(colors=True).info(f"data'{data}'")
-            json_string = json.dumps(data, default=str)
             save_settings(data)
+            logger.opt(colors=True).info(f"<green>Saved</green> settings")
+            with col3:
+                placeholder = st.empty()
+                placeholder.markdown(
+                    "<div style='padding-top: 0.2rem; font-size: 1.5rem;'>✅</div>",
+                    unsafe_allow_html=True
+                )
+                time.sleep(0.2)
+                placeholder.empty()

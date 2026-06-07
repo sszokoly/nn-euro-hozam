@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import sqlite3
 from loguru import logger
 from pathlib import Path
@@ -46,7 +47,7 @@ class Database():
                     logger.opt(colors=True).info(f"<green>Creating</green> TABLE <cyan>{table}</cyan>")
                     cursor.execute(create_table_sql)
             except Exception as e:
-                logger.opt(colors=True).debug(f"<red>Exception</red> {e}")
+                logger.opt(colors=True).exception(f"<red>Exception</red> {e}")
 
     def insert(self, data, table_name=None):
         table, _ = self._table_name_schema(table_name)
@@ -63,7 +64,6 @@ class Database():
                     logger.opt(colors=True).debug(f"<green>Inserting</green> data into <cyan>{table}</cyan>")
                     column_fields = ", ".join(data[0].keys())
                     value_fields = ", ".join(f":{x}" for x in data[0].keys())
-                    
                     cursor.executemany(f'''
                         INSERT INTO {table} ({column_fields})
                         VALUES ({value_fields})
@@ -72,7 +72,7 @@ class Database():
                     logger.opt(colors=True).warning(f"TABLE <cyan>{table}</cyan> doesn't exist.")
 
             except Exception as e:
-                logger.opt(colors=True).debug(f"<red>Exception</red> {e}")                    
+                logger.opt(colors=True).exception(f"<red>Exception</red> {e}")
 
     def fetchall(self, table_name=None):
         table, _ = self._table_name_schema(table_name)
@@ -86,7 +86,7 @@ class Database():
                 cursor = conn.cursor()
 
                 if self._table_exists(cursor, table_name):
-                    logger.opt(colors=True).info(f"<green>Fetching</green> all data from TABLE <cyan>{table}</cyan>")
+                    logger.opt(colors=True).info(f"<green>Fetching</green> ALL data from TABLE <cyan>{table}</cyan>")
                     cursor.execute(f'SELECT * FROM {table}')
                     results = cursor.fetchall()
                 else:
@@ -94,31 +94,10 @@ class Database():
                     results = []
 
             except Exception as e:
-                logger.opt(colors=True).debug(f"<red>Exception</red> {e}")
+                logger.opt(colors=True).exception(f"<red>Exception</red> {e}")
                 results = []                 
 
         return results
-
-    def dropall(self, table_name=None):
-        table, _ = self._table_name_schema(table_name)
-        
-        if not Path(self.db_file).exists():
-            logger.opt(colors=True).warning(f"Database file doesn't exist")
-            return
-        
-        with sqlite3.connect(self.db_file) as conn:
-            try:
-                cursor = conn.cursor()
-
-                if self._table_exists(cursor, table_name):
-                    logger.opt(colors=True).info(f"<red>Dropping</red> TABLE <cyan>{table}</cyan>")
-                    cursor.execute(f'DROP TABLE IF EXISTS {table}')
-                else:
-                    logger.opt(colors=True).warning(f"TABLE <cyan>{table}</cyan> doesn't exist")
-            
-            except Exception as e:
-                logger.opt(colors=True).debug(f"<red>Exception</red> {e}")
-
 
     def fetch_by_date(self, opening_date):
         table, _ = self._table_name_schema("nn")
@@ -140,10 +119,30 @@ class Database():
                     results = []
             
             except Exception as e:
-                logger.opt(colors=True).debug(f"<red>Exception</red> {e}")
+                logger.opt(colors=True).exception(f"<red>Exception</red> {e}")
                 results = []
 
         return results
+
+    def deleteall(self, table_name=None):
+        table, _ = self._table_name_schema(table_name)
+        
+        if not Path(self.db_file).exists():
+            logger.opt(colors=True).warning(f"Database file doesn't exist")
+            return
+        
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                cursor = conn.cursor()
+
+                if self._table_exists(cursor, table_name):
+                    logger.opt(colors=True).info(f"<red>Deleting</red> ALL from <cyan>{table}</cyan>")
+                    cursor.execute(f'DELETE FROM {table}')
+                else:
+                    logger.opt(colors=True).warning(f"TABLE <cyan>{table}</cyan> doesn't exist")
+            
+            except Exception as e:
+                logger.opt(colors=True).exception(f"<red>Exception</red> {e}")
 
     def delete_by_date(self, opening_date):
         table, _ = self._table_name_schema("nn")
@@ -163,7 +162,7 @@ class Database():
                     logger.opt(colors=True).warning(f"TABLE <cyan>{table}</cyan> doesn't exist")
     
             except Exception as e:
-                logger.opt(colors=True).debug(f"<red>Exception</red> {e}")
+                logger.opt(colors=True).exception(f"<red>Exception</red> {e}")
 
     def backup(self, db_file_bkp=None):
         db_file_bkp = db_file_bkp if db_file_bkp else DB_FILE_BKP
@@ -174,7 +173,7 @@ class Database():
                 logger.opt(colors=True).info(f"DB Backup <green>successful</green>")
 
             except sqlite3.Error as e:
-                logger.opt(colors=True).error(f"DB Backup <red>failed</red>: {e}")
+                logger.opt(colors=True).exception(f"DB Backup <red>failed</red>: {e}")
                 if db_file_bkp.exists():
                     db_file_bkp.unlink()
                 raise
@@ -186,7 +185,6 @@ class Database():
         ''', (table,)
         )
         return cursor.fetchone() is not None
-
 
     def _table_name_schema(self, table_name=None):
         if table_name == "st":
@@ -209,10 +207,36 @@ class Database():
         return columns_def
 
 
+def backup_db(db_file=DB_FILE):
+    database = Database(db_file=db_file)
+    database.backup()
+
+def save_settings(data, db_file=DB_FILE):
+    serialized_data = [
+        {k: json.dumps(v) if k == "value" else v for k, v in row.items()}
+        for row in data
+    ]
+    database = Database(db_file=db_file)
+    database.deleteall(table_name="st")
+    database.insert(serialized_data, table_name="st")
+
+def load_settings(db_file=DB_FILE):
+    database = Database(db_file=db_file)
+    data = database.fetchall(table_name="st")
+    deserialized_data = {}
+    for _, k, v in data:
+        try:
+            deserialized_data[k] = json.loads(v)
+        except (json.JSONDecodeError, TypeError):
+            deserialized_data[k] = v
+    return deserialized_data
+
+
 if __name__ == '__main__':
     from logger_config import setup_logging
     setup_logging()
     from loguru import logger
+    import json
 
     database = Database(db_file=TMP_DIR / 'tmp.db', nn_table="tmp", init_db=True)
     data = [
@@ -237,4 +261,11 @@ if __name__ == '__main__':
     results = database.fetch_by_date('2024-01-01')
     print(results)
     database.delete_by_date('2024-01-01')
-    database.dropall()
+    
+    data = [{"key": "selected_assets", "value": ["Euró likviditás eszközalap - D"]},
+            {"key": "asset_percentages", "value": {"Euró likviditás eszközalap - D": 100}},
+            {"key": "start_date", "value": "2025-01-01"}, {"key": "end_date", "value": "2026-01-01"}]
+    save_settings(data)
+    data = load_settings()
+    print(data)
+    

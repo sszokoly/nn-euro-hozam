@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 
 # Setup logging before importing other modules
@@ -8,7 +7,6 @@ setup_logging()
 
 import argparse
 import streamlit as st
-
 from loguru import logger
 from pathlib import Path
 
@@ -30,9 +28,9 @@ def main(args=None):
     
     pages = [
         st.Page(ST_PAGES_DIR / "01_settings.py", title="Settings", icon="⚙️", default=True),
-        st.Page(ST_PAGES_DIR / "02_assets.py", title="Assets", icon="💰"),
-        st.Page(ST_PAGES_DIR / "03_yields.py", title="Yields V1", icon="📊"),
-        st.Page(ST_PAGES_DIR / "04_test.py", title="Yields V2", icon="🚧"),
+        st.Page(ST_PAGES_DIR / "02_downloader.py", title="Download", icon="📥"),
+        st.Page(ST_PAGES_DIR / "03_asset_yields.py", title="Asset Yields Stream", icon="💰"),
+        st.Page(ST_PAGES_DIR / "04_asset_yields_plotly.py", title="Asset Yields Plotly", icon="💰"),
     ]
     pg = st.navigation(pages)
     pg.run()

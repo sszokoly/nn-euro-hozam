@@ -1,7 +1,7 @@
 import streamlit as st
 import time
 from streamlit_lightweight_charts import renderLightweightCharts
-from nn_euro_hozam.config import COLORS
+from config import COLORS
 from loguru import logger
 
 
@@ -10,8 +10,17 @@ if "df" not in st.session_state:
     time.sleep(1)
     st.switch_page("pages/01_settings.py")
 
-selected_assets = st.session_state.selected_assets
+st.markdown(
+    "<h1 style='text-align: center;'>Asset Yields</h1>",
+    unsafe_allow_html=True
+)
 
+
+assets = st.session_state.selected_assets
+logger.opt(colors=True).info(f"Selected Assets: <yellow>{assets}</yellow>")
+
+legend = '<div style="display: flex; gap: 18px; align-items: center; margin-bottom: 6px;">{0}</div>'
+legend_div = '<div><span style="display:inline-block; width:15px; height:5px; background:{1}; margin-right:6px;"></span>{0}</div>'
 
 chartOptions = {
     "height": 800,
@@ -46,9 +55,11 @@ chartOptions = {
     }
 }
 
-seriesLineChart = []
 
-for asset in selected_assets:
+seriesLineChart = []
+legend_divs = []
+
+for asset in assets:
     color = COLORS.get(asset, '#000000')  # Default to black if asset not in COLORS
     logger.opt(colors=True).info(f"Processing asset: <yellow>{asset}</yellow> with color <cyan>{color}</cyan>")
     
@@ -60,25 +71,24 @@ for asset in selected_assets:
     chart_df['time'] = chart_df['time'].astype(str)
     chart_df = chart_df.sort_values(by='time').reset_index(drop=True)
     data = chart_df.to_dict('records')
-    title = st.session_state.df.at[0, 'asset']
+    legend_divs.append(legend_div.format(asset, color))
     
-    logger.opt(colors=True).debug(f"Chart data for <yellow>{asset}</yellow>: <cyan>{len(data)}</cyan> rows")
-    logger.opt(colors=True).debug(f"<cyan>{data}</cyan>")
-
     seriesLineChart.append({
         "type": 'Line',
         "data": data,
         "options": {
-            #"title": title,
             "color": color,
             "lineWidth": 2,
             "lastValueVisible": True,
-            "priceLineVisible": True
+            "priceLineVisible": False,
         }
     })
 
-st.subheader("Compound Yield %")
+st.subheader("Cumprod of Yields in %")
+st.write("Cumulative product of yields measures an investment fund's total percentage growth over a specified period, accounting for the compounding effect of all gains, losses.")
 
+legend = legend.format(''.join(legend_divs))
+st.markdown(legend, unsafe_allow_html=True)
 
 if seriesLineChart:
     renderLightweightCharts([
@@ -89,20 +99,3 @@ if seriesLineChart:
     ], "chart_with_static_legend")
 else:
     st.error("No data available")
-
-
-st.markdown(
-    f"""
-    <div style="display: flex; gap: 18px; align-items: center; margin-bottom: 6px;">
-        <div>
-            <span style="display:inline-block; width:12px; height:3px; background:#2962FF; margin-right:6px;"></span>
-            {title}
-        </div>
-        <div>
-            <span style="display:inline-block; width:12px; height:3px; background:#FF6D00; margin-right:6px;"></span>
-            Memory Usage
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
