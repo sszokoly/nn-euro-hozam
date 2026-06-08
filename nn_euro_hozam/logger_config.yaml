@@ -3,7 +3,7 @@ handlers:
   # To Console
   - sink: ext://sys.stderr
     format: "{time:YYYY-MM-DD HH:mm:ss} | <level>{level:<8}</level> | {message}"
-    level: DEBUG
+    level: INFO
     colorize: true
   # To File
   - sink: app.log

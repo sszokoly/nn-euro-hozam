@@ -143,6 +143,10 @@ if __name__ == '__main__':
     from database import Database
 
     df = import_nn_from_xls(src_dir=XLS_DIR, db_file=DB_FILE)
-    print("==========From XLS=========\n", df.head(), "\n\n")
-    #df2 = import_nn_from_csv()
-    #print("==========From CSV=========\n", df2.head(), "\n\n")
+    print(f"==========From XLS=========\nShape: {df.shape}\n", df.head(), "\n\n")
+    chart_df = df.loc[
+        (df['opening_date'] >= '2025-12-30') &
+        (df['opening_date'] <= '2026-01-10')
+    ]
+    print(f"==========FILTERED=========\nShape: {chart_df.shape}\n", chart_df.head(), "\n\n")
+

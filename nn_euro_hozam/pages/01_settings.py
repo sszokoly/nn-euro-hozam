@@ -13,7 +13,6 @@ from importer import load_nn_from_db, import_nn_from_csv, import_nn_from_xls
 from pathlib import Path
 
 
-
 db_files = sorted(Path(DB_DIR).rglob("*.db"))
 
 if "settings_loaded" not in st.session_state:
@@ -231,6 +230,10 @@ end_date = date(end_year, end_month, 1)
 
 st.session_state.start_date = start_date.isoformat()
 st.session_state.end_date = end_date.isoformat()
+st.session_state.chart_df = st.session_state.df.loc[
+    (st.session_state.df['opening_date'] >= st.session_state.start_date) &
+    (st.session_state.df['opening_date'] <= st.session_state.end_date)
+]
 
 # End columns section
 st.container()  # forces column context to close
@@ -240,7 +243,7 @@ st.divider(width=1250)
 
 st.subheader("Asset Selector")
 
-assets = st.session_state.df["asset"].unique().tolist()
+assets = st.session_state.all_assets = st.session_state.df["asset"].unique().tolist()
 
 # Initialize session state
 if "available_assets" not in st.session_state:

@@ -29,8 +29,8 @@ def main(args=None):
     pages = [
         st.Page(ST_PAGES_DIR / "01_settings.py", title="Settings", icon="⚙️", default=True),
         st.Page(ST_PAGES_DIR / "02_downloader.py", title="Download", icon="📥"),
-        st.Page(ST_PAGES_DIR / "03_asset_yields.py", title="Asset Yields Stream", icon="💰"),
-        st.Page(ST_PAGES_DIR / "04_asset_yields_plotly.py", title="Asset Yields Plotly", icon="💰"),
+        st.Page(ST_PAGES_DIR / "03_asset_yields.py", title="Asset Yields", icon="💰"),
+        #st.Page(ST_PAGES_DIR / "09_asset_yields_plotly.py", title="Asset Yields Plotly", icon="💰"),
     ]
     pg = st.navigation(pages)
     pg.run()
