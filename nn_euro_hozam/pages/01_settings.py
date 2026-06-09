@@ -33,13 +33,10 @@ def change_db_file():
 
 @st.dialog("Confirm Action")
 def confirm_dialog(fn, msg="OK to Proceed?"):
-    st.warning(
-        "This will erase ALL NN Euro data from Database!\n\n"
-        "Data will be lost if backup is not available!"
-    )
+    st.warning(msg)
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Proceed", width='content'):
+        if st.button("Proceed", width='stretch'):
             logger.opt(colors=True).info("Reloading")
             with st.spinner("Processing..."):
                 df = fn()
@@ -48,7 +45,7 @@ def confirm_dialog(fn, msg="OK to Proceed?"):
                     st.session_state.df = df
             st.rerun()
     with col2:
-        if st.button("Cancel", width='content'):
+        if st.button("Cancel", width='stretch'):
             st.rerun()
 
 
@@ -63,7 +60,7 @@ if "df" not in st.session_state:
 
 ############################## DB SELECTOR BLOCK ##############################
 
-st.subheader("NN Euro Data Source")
+st.subheader("NN Euro Dataframe Source")
 
 col1, col2, col3, col4, col5, col6 = st.columns([6, 1.4, 0.4, 1.4, 0.4, 5])
 
@@ -107,7 +104,9 @@ with col4:
     """, unsafe_allow_html=True)
     
     if st.button("Reload from XLS", type="secondary", width='stretch'):
-        confirm_dialog(import_nn_from_xls)
+        msg = ("This will erase ALL NN Euro data from Database!\n\n"
+                "Data will be lost if backup is not available!")
+        confirm_dialog(import_nn_from_xls, msg)
 
 with col1:
     st.write("")
@@ -228,6 +227,8 @@ with col5:
 
 end_date = date(end_year, end_month, 1)
 
+st.session_state.df_start = df_start
+st.session_state.df_end = df_end
 st.session_state.start_date = start_date.isoformat()
 st.session_state.end_date = end_date.isoformat()
 st.session_state.chart_df = st.session_state.df.loc[

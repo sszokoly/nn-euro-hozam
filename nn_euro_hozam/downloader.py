@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 from loguru import logger
 from pathlib import Path
 from random import randint
+from queue import Queue
 from utils import date_generator
 
 from selenium import webdriver
@@ -413,6 +414,7 @@ def download_multiple_xls(
     min_sleep_secs: int = 30,
     outfile_path: Path = None,
     append_timestamp: bool = True,
+    queue: Queue = None
 ):
 
     outfile_path = Path(outfile_path).resolve() if outfile_path else Path.cwd()
@@ -425,24 +427,58 @@ def download_multiple_xls(
         while attempt < retries:
             start_end = f"{start} - {end}"
             try:
-                logger.opt(colors=True).info(f"Download attempt for {start_end} to <yellow>{outfile_path}</yellow>")
+                logger.opt(colors=True).info(
+                    f"Download attempt for {start_end} "
+                    f"to <yellow>{outfile_path}</yellow>"
+                )
+                
                 output_path = download_xls(
                     start_date=start,
                     end_date=end,
                     outfile_path=outfile_path,
                     append_timestamp=append_timestamp
                 )
-                logger.opt(colors=True).info(f"Download <green>success</green> for {start_end} to <yellow>{output_path}</yellow> - sleep <cyan>{min_sleep_secs}</cyan> secs")
+                
+                logger.opt(colors=True).info(
+                    f"Download <green>success</green> for {start_end} "
+                    f"to <yellow>{output_path}</yellow> "
+                    f"- sleep <cyan>{min_sleep_secs}</cyan> secs"
+                )
+                
+                if queue and not queue.full():
+                    queue.put(
+                        f"Download success for {output_path}, "
+                        f"trying next in  {min_sleep_secs:>3}secs"
+                    )
                 break
-            except Exception as exc:
-                logger.opt(colors=True).debug(f"Exception during download for {start_end}: <red>{exc}</red>")
+            
+            except Exception as e:
+                logger.opt(colors=True).debug(
+                    f"Exception in download for {start_end}: <red>{e}</red>"
+                )
+                
                 attempt += 1
                 if attempt < retries:
                     sleep_sec = min_sleep_secs + randint(1, min_sleep_secs)
-                    logger.opt(colors=True).error(f"Download <red>failed</red>  for {start_end} on attempt <cyan>{attempt}</cyan> - sleep <cyan>{sleep_sec:>3}</cyan> secs...")
+                    
+                    logger.opt(colors=True).error(
+                        f"Download <red>failed</red>  for {start_end} "
+                        f"on attempt <cyan>{attempt}</cyan> "
+                        f"- sleep <cyan>{sleep_sec:>3}</cyan> secs..."
+                    )
+                    
+                    if queue and not queue.full():
+                        queue.put(
+                            f"Download failed, "
+                            f"trying again in {sleep_sec:>3}secs"
+                        )
                     time.sleep(sleep_sec)
+                
                 else:
-                    logger.opt(colors=True).error(f"Download <red>failed</red>  for {start_end} after <cyan>{retries}</cyan> attempts.")
+                    logger.opt(colors=True).error(
+                        f"Download <red>failed</red>  for {start_end} "
+                        f"after <cyan>{retries}</cyan> attempts."
+                    )
                     
 
 if __name__ == "__main__":
@@ -515,6 +551,7 @@ if __name__ == "__main__":
         retries=args.retries,
         min_sleep_secs=args.min_sleep_secs,
         outfile_path=args.outfile_path,
-        append_timestamp=args.append_timestamp
+        append_timestamp=args.append_timestamp,
+
     )
     print(output_path)

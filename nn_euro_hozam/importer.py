@@ -11,8 +11,6 @@ from xls_to_dict import xls_to_dict
 from database import Database
 from config import (
     DB_FILE,
-    DB_NN_TABLE_NAME,
-    DB_ST_TABLE_NAME,
     XLS_DIR,
     CSV_FILE,
     FIELD_NAMES,
@@ -20,13 +18,17 @@ from config import (
 )
 
 
-def opening_euro_value_cumsum(df, round_digits=ROUND_DIGITS):
-    df["opening_euro_value_cumsum"] = (
+def value_ma_90d(df):
+    # Calculate a 90-day rolling average (approx. 3 months)
+    # min_periods=1 ensures you get a value even at the start
+    df["value_ma_90d"] = (
         df.groupby("asset")["opening_euro_value"]
-          .cumsum()
-          .round(decimals=round_digits)
+        .rolling(window=90, min_periods=1)
+        .mean()
+        .reset_index(level=0, drop=True) # Align index back to original
     )
     return df
+
 
 def period_yield_pct_cumprod(df, round_digit=ROUND_DIGITS):
     df["growth_factor"] = 1 + df["period_yield_pct"]
@@ -35,8 +37,10 @@ def period_yield_pct_cumprod(df, round_digit=ROUND_DIGITS):
           .cumprod()
           .round(decimals=round_digit)
     )
-    df["period_yield_pct_cumprod"] = ((df["cumulative_growth"] - 1) * 100).round(decimals=round_digit)
+    df["period_yield_pct_cumprod"] = (
+        (df["cumulative_growth"] - 1) * 100).round(decimals=round_digit)
     return df
+
 
 def coerce_data(data) -> list:
     coerced_data = []
@@ -71,7 +75,7 @@ def ffill_data(data) -> list:
 
 def data_to_dataframe(data):
     df = pd.DataFrame(data, columns=FIELD_NAMES)
-    df = opening_euro_value_cumsum(df)
+    df = value_ma_90d(df)
     df = period_yield_pct_cumprod(df)
     return df
 
@@ -79,10 +83,12 @@ def data_to_dataframe(data):
 def import_nn_from_xls(
     src_dir=XLS_DIR,
     round_digits=ROUND_DIGITS,
-    db_file=DB_FILE
+    db_file=DB_FILE,
+    csv_file=CSV_FILE,
 ):
     xls_files = sorted(Path(src_dir).rglob("*.xls"))
-    database = Database(db_file=db_file, nn_table=DB_NN_TABLE_NAME, init_db=True)
+    database = Database(db_file=db_file)
+    database.deleteall(table_name="nn")
     yesterday_date = None
     
     for filepath in xls_files:
@@ -115,22 +121,20 @@ def import_nn_from_xls(
 
     data = database.fetchall()
     df = data_to_dataframe(data)
-    df.to_csv(CSV_FILE, index=False)
+    df.to_csv(csv_file, index=False)
     return df
 
 
-def import_nn_from_csv(csv_file=None):
-    csv_file = csv_file if csv_file else CSV_FILE
+def import_nn_from_csv(csv_file=CSV_FILE):
     if not csv_file.exists():
         logger.error(f"CSV file not found: {csv_file}")
         return None
-    
     df = pd.read_csv(csv_file)
     return df
 
 
 def load_nn_from_db(db_file=DB_FILE):
-    database = Database(db_file=db_file, init_db=False)
+    database = Database(db_file=db_file)
     data = database.fetchall()
     df = data_to_dataframe(data)
     return df

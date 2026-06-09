@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 import plotly.graph_objects as go
 import time
 from config import COLORS
@@ -12,7 +11,7 @@ if "df" not in st.session_state:
     st.switch_page("pages/01_settings.py")
 
 st.markdown(
-    "<h1 style='text-align: center;'>Asset Yields</h1>",
+    "<h1 style='text-align: center;'>Asset Values</h1>",
     unsafe_allow_html=True
 )
 
@@ -24,6 +23,15 @@ def contrasting_text_color(hex_color):
 
 def change_asset_group():
     st.session_state.selected_asset_group = st.session_state._asset_group_picker
+
+def get_growth_rate(group):
+    if len(group) < 2:
+        return 0
+    start_val = group['value_ma_90d'].iloc[0]
+    end_val = group['value_ma_90d'].iloc[-1]
+    if start_val == 0:
+        return 0
+    return ((end_val - start_val) / start_val) * 100
 
 assets = []
 st.session_state.asset_groups = ["My Assets", "All Assets", "Top 5 Performers"]
@@ -45,13 +53,13 @@ if "selected_asset_group" in st.session_state:
     elif st.session_state.selected_asset_group == "All Assets":
         assets = st.session_state.all_assets
     elif st.session_state.selected_asset_group == "Top 5 Performers":
-        assets = (
-            st.session_state.chart_df.groupby('asset')['period_yield_pct_cumprod']
-            .max()
-            .sort_values(ascending=False)
-            .index[:5]  # Select only the first 5 indices
-            .tolist()   # Convert to list
+        growth_rates = (
+            st.session_state.chart_df
+            .groupby('asset')
+            .apply(get_growth_rate)
+            .rename('growth_pct')
         )
+        assets = growth_rates.sort_values(ascending=False).head(5).index.tolist()
 
 fig = go.Figure()
 
@@ -61,14 +69,16 @@ for asset in assets:
     
     chart_df = st.session_state.chart_df.loc[
         st.session_state.chart_df['asset'] == asset, 
-        ['opening_date', 'period_yield_pct_cumprod']
-    ].rename(columns={'opening_date': 'time', 'period_yield_pct_cumprod': 'value'})
+        ['opening_date', 'value_ma_90d']
+    ].rename(columns={'opening_date': 'time', 'value_ma_90d': 'value'})
 
     chart_df['time'] = chart_df['time'].astype(str)
     chart_df = chart_df.sort_values(by='time').reset_index(drop=True)
 
     last_time = chart_df["time"].iloc[-1]
     last_value = chart_df["value"].iloc[-1]
+    first_time = chart_df["time"].iloc[0]
+    first_value = chart_df["value"].iloc[0]
 
     fig.add_trace(
         go.Scatter(
@@ -84,10 +94,21 @@ for asset in assets:
     fig.add_annotation(
         x=last_time,
         y=last_value,
-        text=f"{last_value:.1f}%",
+        text=f"{last_value:.1f}",
         showarrow=False,
         xanchor="left",
         xshift=5,
+        bgcolor=color,
+        font=dict(color=contrasting_text_color(color), size=14),
+    )
+    
+    fig.add_annotation(
+        x=first_time,
+        y=first_value,
+        text=f"{first_value:.1f}",
+        showarrow=False,
+        xanchor="left",
+        xshift=-5,
         bgcolor=color,
         font=dict(color=contrasting_text_color(color), size=14),
     )
@@ -116,7 +137,7 @@ fig.update_layout(
     yaxis=dict(
         side="right",
         showgrid=True,
-        title="Yield %",
+        title="Value €",
         fixedrange=True,
         title_font=dict(size=18)
     ),
@@ -132,8 +153,8 @@ fig.update_layout(
     ),
 )
 
-st.subheader("Cumprod of Yields in %")
-st.write("Cumulative product of yields measures the investment fund's total percentage growth over a specified period, accounting for the compounding effect of all gains, losses.")
+st.subheader("90-day Moving Average")
+st.write("A 90-day rolling average of asset values.")
 
 st.plotly_chart(
     fig,
