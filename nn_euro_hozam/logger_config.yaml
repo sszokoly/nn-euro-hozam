@@ -3,12 +3,12 @@ handlers:
   # To Console
   - sink: ext://sys.stderr
     format: "{time:YYYY-MM-DD HH:mm:ss} | <level>{level:<8}</level> | {message}"
-    level: ERROR
+    level: INFO
     colorize: true
   # To File
   - sink: app.log
     format: "{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {function:<15} | {line:<3} | {message}"
-    level: ERROR
+    level: INFO
     rotation: 2048000           # Rotates when file exceeds 2MB
     retention: 3                # Keeps only the 3 most recent rotated files
 ...

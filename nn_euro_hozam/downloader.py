@@ -414,71 +414,100 @@ def download_multiple_xls(
     min_sleep_secs: int = 30,
     outfile_path: Path = None,
     append_timestamp: bool = True,
-    queue: Queue = None
+    progress_queue: Queue = None
 ):
 
     outfile_path = Path(outfile_path).resolve() if outfile_path else Path.cwd()
 
-    for start, end in date_generator(start_date, end_date, interval):
-        if start != start_date:
-            time.sleep(min_sleep_secs)
+    logger.opt(colors=True).info(f"Start date: <yellow>{start_date}</yellow>")
 
-        attempt = 0
-        while attempt < retries:
-            start_end = f"{start} - {end}"
-            try:
-                logger.opt(colors=True).info(
-                    f"Download attempt for {start_end} "
-                    f"to <yellow>{outfile_path}</yellow>"
-                )
-                
-                output_path = download_xls(
-                    start_date=start,
-                    end_date=end,
-                    outfile_path=outfile_path,
-                    append_timestamp=append_timestamp
-                )
-                
-                logger.opt(colors=True).info(
-                    f"Download <green>success</green> for {start_end} "
-                    f"to <yellow>{output_path}</yellow> "
-                    f"- sleep <cyan>{min_sleep_secs}</cyan> secs"
-                )
-                
-                if queue and not queue.full():
-                    queue.put(
-                        f"Download success for {output_path}, "
-                        f"trying next in  {min_sleep_secs:>3}secs"
-                    )
-                break
-            
-            except Exception as e:
-                logger.opt(colors=True).debug(
-                    f"Exception in download for {start_end}: <red>{e}</red>"
-                )
-                
-                attempt += 1
-                if attempt < retries:
-                    sleep_sec = min_sleep_secs + randint(1, min_sleep_secs)
-                    
-                    logger.opt(colors=True).error(
-                        f"Download <red>failed</red>  for {start_end} "
-                        f"on attempt <cyan>{attempt}</cyan> "
-                        f"- sleep <cyan>{sleep_sec:>3}</cyan> secs..."
+    try:
+        try:
+            resolved_start_date, resolved_end_date = _resolve_dates(start_date, end_date)
+        except Exception as e:
+            logger.opt(colors=True).error(f"Invalid date: {e}")
+            return
+
+        if (
+            resolved_end_date > date.today() or
+            resolved_start_date >= resolved_end_date
+        ):
+            logger.opt(colors=True).error(f"Invalid {start_date} or {end_date}")
+            return
+
+        if interval == "daily":
+            resolved_interval = timedelta(days=1)
+        elif interval == "weekly":
+            resolved_interval = timedelta(days=7)
+        else:
+            logger.opt(colors=True).error(f"Invalid interval {interval}")
+            return
+
+        start = resolved_start_date
+        end = start + resolved_interval
+        total_intervals = (resolved_end_date - resolved_start_date) / resolved_interval
+        interval_count = 0
+
+        while start < resolved_end_date:
+            if start != resolved_start_date:
+                time.sleep(min_sleep_secs)
+
+            attempt = 0
+            while attempt < retries:
+                start_end = f"{start.isoformat()} - {end.isoformat()}"
+                try:
+                    logger.opt(colors=True).info(
+                        f"Download attempt for {start_end} "
+                        f"to <yellow>{outfile_path}</yellow>"
                     )
                     
-                    if queue and not queue.full():
-                        queue.put(
-                            f"Download failed, "
-                            f"trying again in {sleep_sec:>3}secs"
+                    output_path = "test"
+                    # output_path = download_xls(
+                    #     start_date=start.isoformat(),
+                    #     end_date=end.isoformat(),
+                    #     outfile_path=outfile_path,
+                    #     append_timestamp=append_timestamp
+                    # )
+                    
+                    logger.opt(colors=True).info(
+                        f"Download <green>success</green> for {start_end} "
+                        f"to <yellow>{output_path}</yellow> "
+                        f"- sleep <cyan>{min_sleep_secs}</cyan> secs"
+                    )
+                    
+                    start += resolved_interval
+                    end += resolved_interval
+                    interval_count += 1
+                    
+                    if progress_queue and not progress_queue.full():
+                        progress_queue.put(int(interval_count / total_intervals * 100))
+                    
+                    break
+                
+                except Exception as e:
+                    logger.opt(colors=True).debug(
+                        f"Exception in download for {start_end}: <red>{e}</red>"
+                    )
+                    
+                    attempt += 1
+                    if attempt < retries:
+                        sleep_sec = min_sleep_secs + randint(1, min_sleep_secs)
+                        
+                        logger.opt(colors=True).error(
+                            f"Download <red>failed</red>  for {start_end} "
+                            f"on attempt <cyan>{attempt}</cyan> "
+                            f"- sleep <cyan>{sleep_sec:>3}</cyan> secs..."
                         )
-                    time.sleep(sleep_sec)
-                
-                else:
-                    logger.opt(colors=True).error(
-                        f"Download <red>failed</red>  for {start_end} "
-                        f"after <cyan>{retries}</cyan> attempts."
-                    )
+                        time.sleep(sleep_sec)
+                    
+                    else:
+                        logger.opt(colors=True).error(
+                            f"Download <red>failed</red>  for {start_end} "
+                            f"after <cyan>{retries}</cyan> attempts."
+                        )       
+    finally:
+        if progress_queue:
+            progress_queue.put(None)
                     
 
 if __name__ == "__main__":
@@ -486,6 +515,14 @@ if __name__ == "__main__":
     setup_logging()
     from loguru import logger
     import argparse
+    import sys
+    
+    # pq = Queue()
+    # sys.argv.extend([
+    #     "--start-date", "2026-06-06",
+    #     "--end-date", "2026-06-09",
+    #     "--min-sleep-secs", "2"
+    # ])
 
     parser = argparse.ArgumentParser(
         description="Download NN Euro Alap rendszeres díjas yield spreadsheets."
@@ -552,6 +589,5 @@ if __name__ == "__main__":
         min_sleep_secs=args.min_sleep_secs,
         outfile_path=args.outfile_path,
         append_timestamp=args.append_timestamp,
-
     )
     print(output_path)
