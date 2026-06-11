@@ -140,17 +140,70 @@ def load_nn_from_db(db_file=DB_FILE):
     return df
 
 
+def merge_xls_with_nn(
+    files,
+    round_digits=ROUND_DIGITS,
+    db_file=DB_FILE,
+    csv_file=CSV_FILE,
+):
+    if not files:
+        return
+    
+    database = Database(db_file=db_file)
+    last = database.fetch_last()
+    yesterday_date = datetime.strptime(last[0][2], "%Y-%m-%d").date()
+    
+    for file in files:
+        
+        filepath = Path(file).resolve()
+        if not filepath.exists():
+            continue
+        
+        logger.opt(colors=True).info(f"Loading <yellow>{filepath}</yellow>")
+        opening_date, closing_date, data = xls_to_dict(filepath, round_digits)
+
+        if not opening_date and not closing_date:
+            if yesterday_date:
+                data = database.fetch_by_date(yesterday_date.isoformat())
+                data = ffill_data(data)
+                database.insert(data)
+                yesterday_date += timedelta(days=1)
+            else:
+                # nothing to do, just continue
+                continue
+
+        elif opening_date and closing_date:
+            while yesterday_date and yesterday_date < opening_date - timedelta(days=1):
+                data2 = database.fetch_by_date(yesterday_date.isoformat())
+                data2 = ffill_data(data2)
+                database.insert(data2)
+                yesterday_date += timedelta(days=1)
+        
+            if opening_date == yesterday_date:
+                database.delete_by_date(opening_date.isoformat())
+        
+            data = coerce_data(data)
+            database.insert(data)
+            yesterday_date = opening_date
+
+    data = database.fetchall()
+    df = data_to_dataframe(data)
+    df.to_csv(csv_file, index=False)
+    return df
+
+
 if __name__ == '__main__':
     from logger_config import setup_logging
     setup_logging()
     from loguru import logger
     from database import Database
 
-    df = import_nn_from_xls(src_dir=XLS_DIR, db_file=DB_FILE)
-    print(f"==========From XLS=========\nShape: {df.shape}\n", df.head(), "\n\n")
-    chart_df = df.loc[
-        (df['opening_date'] >= '2025-12-30') &
-        (df['opening_date'] <= '2026-01-10')
-    ]
-    print(f"==========FILTERED=========\nShape: {chart_df.shape}\n", chart_df.head(), "\n\n")
+    df = merge_xls_with_nn(["data/xls/NN_eszkozalap_hozamok_2026-06-07_2026-06-08.xls"])
+    # df = import_nn_from_xls(src_dir=XLS_DIR, db_file=DB_FILE)
+    # print(f"==========From XLS=========\nShape: {df.shape}\n", df.head(), "\n\n")
+    # chart_df = df.loc[
+    #     (df['opening_date'] >= '2025-12-30') &
+    #     (df['opening_date'] <= '2026-01-10')
+    # ]
+    # print(f"==========FILTERED=========\nShape: {chart_df.shape}\n", chart_df.head(), "\n\n")
 

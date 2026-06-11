@@ -55,7 +55,7 @@ def main(args=None):
     
     pages = [
         st.Page(ST_PAGES_DIR / "01_settings.py", title="Settings", icon="⚙️", default=True),
-        st.Page(ST_PAGES_DIR / "02_downloader.py", title="Download", icon="📥"),
+        st.Page(ST_PAGES_DIR / "02_downloader.py", title="Downloader", icon="📥"),
         st.Page(ST_PAGES_DIR / "03_dataframe.py", title="Dataframe", icon="📋"),
         st.Page(ST_PAGES_DIR / "04_asset_yields.py", title="Asset Yields", icon="💰"),
         st.Page(ST_PAGES_DIR / "05_asset_values.py", title="Asset Values", icon="📈"),

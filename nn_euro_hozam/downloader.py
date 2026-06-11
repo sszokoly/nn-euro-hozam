@@ -9,6 +9,7 @@ from loguru import logger
 from pathlib import Path
 from random import randint
 from queue import Queue
+from threading import Event
 from utils import date_generator
 
 from selenium import webdriver
@@ -414,7 +415,9 @@ def download_multiple_xls(
     min_sleep_secs: int = 30,
     outfile_path: Path = None,
     append_timestamp: bool = True,
-    progress_queue: Queue = None
+    progress_queue: Queue = None,
+    result_queue: Queue = None,
+    stop_event: Event = Event(),
 ):
 
     outfile_path = Path(outfile_path).resolve() if outfile_path else Path.cwd()
@@ -422,93 +425,104 @@ def download_multiple_xls(
     logger.opt(colors=True).info(f"Start date: <yellow>{start_date}</yellow>")
 
     try:
-        try:
-            resolved_start_date, resolved_end_date = _resolve_dates(start_date, end_date)
-        except Exception as e:
-            logger.opt(colors=True).error(f"Invalid date: {e}")
-            return
+        while not stop_event.is_set():
+            try:
+                resolved_start_date, resolved_end_date = _resolve_dates(start_date, end_date)
+            except Exception as e:
+                logger.opt(colors=True).error(f"Invalid date: {e}")
+                return
 
-        if (
-            resolved_end_date > date.today() or
-            resolved_start_date >= resolved_end_date
-        ):
-            logger.opt(colors=True).error(f"Invalid {start_date} or {end_date}")
-            return
+            if (
+                resolved_end_date > date.today() or
+                resolved_start_date >= resolved_end_date
+            ):
+                logger.opt(colors=True).error(f"Invalid {start_date} or {end_date}")
+                return
 
-        if interval == "daily":
-            resolved_interval = timedelta(days=1)
-        elif interval == "weekly":
-            resolved_interval = timedelta(days=7)
-        else:
-            logger.opt(colors=True).error(f"Invalid interval {interval}")
-            return
+            if interval == "daily":
+                resolved_interval = timedelta(days=1)
+            elif interval == "weekly":
+                resolved_interval = timedelta(days=7)
+            else:
+                logger.opt(colors=True).error(f"Invalid interval {interval}")
+                return
 
-        start = resolved_start_date
-        end = start + resolved_interval
-        total_intervals = (resolved_end_date - resolved_start_date) / resolved_interval
-        interval_count = 0
+            start = resolved_start_date
+            end = start + resolved_interval
+            total_intervals = (resolved_end_date - resolved_start_date) / resolved_interval
+            interval_count = 0
+            downloaded_files = []
 
-        while start < resolved_end_date:
-            if start != resolved_start_date:
-                time.sleep(min_sleep_secs)
+            while start < resolved_end_date:
+                if start != resolved_start_date:
+                    stop_event.wait(timeout=min_sleep_secs)
 
-            attempt = 0
-            while attempt < retries:
-                start_end = f"{start.isoformat()} - {end.isoformat()}"
-                try:
-                    logger.opt(colors=True).info(
-                        f"Download attempt for {start_end} "
-                        f"to <yellow>{outfile_path}</yellow>"
-                    )
-                    
-                    output_path = "test"
-                    # output_path = download_xls(
-                    #     start_date=start.isoformat(),
-                    #     end_date=end.isoformat(),
-                    #     outfile_path=outfile_path,
-                    #     append_timestamp=append_timestamp
-                    # )
-                    
-                    logger.opt(colors=True).info(
-                        f"Download <green>success</green> for {start_end} "
-                        f"to <yellow>{output_path}</yellow> "
-                        f"- sleep <cyan>{min_sleep_secs}</cyan> secs"
-                    )
-                    
-                    start += resolved_interval
-                    end += resolved_interval
-                    interval_count += 1
-                    
-                    if progress_queue and not progress_queue.full():
-                        progress_queue.put(int(interval_count / total_intervals * 100))
-                    
-                    break
-                
-                except Exception as e:
-                    logger.opt(colors=True).debug(
-                        f"Exception in download for {start_end}: <red>{e}</red>"
-                    )
-                    
-                    attempt += 1
-                    if attempt < retries:
-                        sleep_sec = min_sleep_secs + randint(1, min_sleep_secs)
-                        
-                        logger.opt(colors=True).error(
-                            f"Download <red>failed</red>  for {start_end} "
-                            f"on attempt <cyan>{attempt}</cyan> "
-                            f"- sleep <cyan>{sleep_sec:>3}</cyan> secs..."
+                attempt = 0
+                while attempt < retries:
+                    start_end = f"{start.isoformat()} - {end.isoformat()}"
+                    try:
+                        logger.opt(colors=True).info(
+                            f"Download attempt for {start_end} "
+                            f"to <yellow>{outfile_path}</yellow>"
                         )
-                        time.sleep(sleep_sec)
+                        
+                        #output_path = f"test_{start_end}"
+                        output_path = download_xls(
+                            start_date=start.isoformat(),
+                            end_date=end.isoformat(),
+                            outfile_path=outfile_path,
+                            append_timestamp=append_timestamp
+                        )
+                        
+                        downloaded_files.append(output_path)
+                        
+                        logger.opt(colors=True).info(
+                            f"Download <green>success</green> for {start_end} "
+                            f"to <yellow>{output_path}</yellow>, "
+                            f"sleep <cyan>{min_sleep_secs}</cyan> secs"
+                        )
+                        
+                        start += resolved_interval
+                        end += resolved_interval
+                        interval_count += 1
+                        
+                        if progress_queue and not progress_queue.full():
+                            pct = int(interval_count / total_intervals * 100)
+                            progress_queue.put(pct)
+                            logger.opt(colors=True).info(
+                                f"Put <cyan>{pct}</cyan> in the progress_queue"
+                            )
+                        break
                     
-                    else:
-                        logger.opt(colors=True).error(
-                            f"Download <red>failed</red>  for {start_end} "
-                            f"after <cyan>{retries}</cyan> attempts."
-                        )       
+                    except Exception as e:
+                        logger.opt(colors=True).debug(
+                            f"Exception in download for {start_end}: <red>{e}</red>"
+                        )
+                        
+                        attempt += 1
+                        if attempt < retries:
+                            sleep_sec = min_sleep_secs + randint(1, min_sleep_secs)
+                            
+                            logger.opt(colors=True).error(
+                                f"Download <red>failed</red>  for {start_end} "
+                                f"on attempt <cyan>{attempt}</cyan>, "
+                                f"sleep <cyan>{sleep_sec:>3}</cyan> secs..."
+                            )
+                            stop_event.wait(timeout=sleep_sec)
+                        
+                        else:
+                            logger.opt(colors=True).error(
+                                f"Download <red>failed</red>  for {start_end} "
+                                f"after <cyan>{retries}</cyan> attempts."
+                            )
+            stop_event.set()
     finally:
         if progress_queue:
-            progress_queue.put(None)
-                    
+            progress_queue.put("done")
+            logger.opt(colors=True).info(f"Put <cyan>done</cyan> in the progress_queue")
+        if result_queue:
+            result_queue.put(downloaded_files)
+
 
 if __name__ == "__main__":
     from logger_config import setup_logging

@@ -124,6 +124,31 @@ class Database():
 
         return results
 
+    def fetch_last(self):
+        table, _ = self._table_name_schema("nn")
+
+        if not Path(self.db_file).exists():
+            logger.opt(colors=True).warning(f"Database file doesn't exist")
+            return
+
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                cursor = conn.cursor()
+
+                if self._table_exists(cursor, table_name="nn"):
+                    logger.opt(colors=True).debug(f"<green>Fetching</green> data for last date from <yellow>{table}</yellow>")
+                    cursor.execute(f'SELECT * FROM {table} WHERE opening_date = (SELECT MAX(opening_date) FROM {table})',)
+                    results = cursor.fetchall()
+                else:
+                    logger.opt(colors=True).warning(f"TABLE <cyan>{table}</cyan> doesn't exist")
+                    results = []
+            
+            except Exception as e:
+                logger.opt(colors=True).exception(f"<red>Exception</red> {e}")
+                results = []
+
+        return results
+
     def deleteall(self, table_name=None):
         table, _ = self._table_name_schema(table_name)
         
