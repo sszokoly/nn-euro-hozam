@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
 
-import pandas as pd
-from datetime import datetime, timedelta
-from fileinput import filename
 from loguru import logger
-from multiprocessing.util import debug
-from pathlib import Path
-from xls_to_dict import xls_to_dict
-
 from database import Database
+from xls_to_dict import xls_to_dict
 from config import (
     DB_FILE,
     XLS_DIR,
@@ -17,13 +11,18 @@ from config import (
     ROUND_DIGITS
 )
 
+import pandas as pd
+from datetime import datetime, timedelta
+from multiprocessing.util import debug
+from pathlib import Path
 
-def value_ma_90d(df):
+
+def value_moving_avg(df, days=90):
     # Calculate a 90-day rolling average (approx. 3 months)
     # min_periods=1 ensures you get a value even at the start
-    df["value_ma_90d"] = (
+    df[f"value_ma_{days}d"] = (
         df.groupby("asset")["opening_euro_value"]
-        .rolling(window=90, min_periods=1)
+        .rolling(window=days, min_periods=1)
         .mean()
         .reset_index(level=0, drop=True) # Align index back to original
     )
@@ -75,7 +74,9 @@ def ffill_data(data) -> list:
 
 def data_to_dataframe(data):
     df = pd.DataFrame(data, columns=FIELD_NAMES)
-    df = value_ma_90d(df)
+    df = value_moving_avg(df, 50)
+    df = value_moving_avg(df, 100)
+    df = value_moving_avg(df, 200)
     df = period_yield_pct_cumprod(df)
     return df
 
@@ -89,35 +90,34 @@ def import_nn_from_xls(
     xls_files = sorted(Path(src_dir).rglob("*.xls"))
     database = Database(db_file=db_file)
     database.deleteall(table_name="nn")
-    yesterday_date = None
+    yest_date = None
     
     for filepath in xls_files:
         logger.opt(colors=True).debug(f"Loading <yellow>{filepath}</yellow>")
         opening_date, closing_date, data = xls_to_dict(filepath, round_digits)
         
         if not opening_date and not closing_date:
-            if yesterday_date:
-                data = database.fetch_by_date(yesterday_date.isoformat())
+            if yest_date:
+                data = database.fetch_nn_by_date(yest_date.isoformat())
                 data = ffill_data(data)
                 database.insert(data)
-                yesterday_date += timedelta(days=1)
+                yest_date += timedelta(days=1)
             else:
-                # nothing to do, just continue
                 continue
         
         elif opening_date and closing_date:
-            while yesterday_date and yesterday_date < opening_date - timedelta(days=1):
-                data2 = database.fetch_by_date(yesterday_date.isoformat())
+            while yest_date and yest_date < opening_date - timedelta(days=1):
+                data2 = database.fetch_nn_by_date(yest_date.isoformat())
                 data2 = ffill_data(data2)
                 database.insert(data2)
-                yesterday_date += timedelta(days=1)
+                yest_date += timedelta(days=1)
         
-            if opening_date == yesterday_date:
-                database.delete_by_date(opening_date.isoformat())
+            if opening_date == yest_date:
+                database.delete_nn_by_date(opening_date.isoformat())
         
             data = coerce_data(data)
             database.insert(data)
-            yesterday_date = opening_date
+            yest_date = opening_date
 
     data = database.fetchall()
     df = data_to_dataframe(data)
@@ -150,8 +150,7 @@ def merge_xls_with_nn(
         return
     
     database = Database(db_file=db_file)
-    last = database.fetch_last()
-    yesterday_date = datetime.strptime(last[0][2], "%Y-%m-%d").date()
+    yest_date = database.end_date
     
     for file in files:
         
@@ -163,28 +162,27 @@ def merge_xls_with_nn(
         opening_date, closing_date, data = xls_to_dict(filepath, round_digits)
 
         if not opening_date and not closing_date:
-            if yesterday_date:
-                data = database.fetch_by_date(yesterday_date.isoformat())
+            if yest_date:
+                data = database.fetch_nn_by_date(yest_date.isoformat())
                 data = ffill_data(data)
                 database.insert(data)
-                yesterday_date += timedelta(days=1)
+                yest_date += timedelta(days=1)
             else:
-                # nothing to do, just continue
                 continue
 
         elif opening_date and closing_date:
-            while yesterday_date and yesterday_date < opening_date - timedelta(days=1):
-                data2 = database.fetch_by_date(yesterday_date.isoformat())
+            while yest_date and yest_date < opening_date:# - timedelta(days=1):
+                data2 = database.fetch_nn_by_date(yest_date.isoformat())
                 data2 = ffill_data(data2)
                 database.insert(data2)
-                yesterday_date += timedelta(days=1)
+                yest_date += timedelta(days=1)
         
-            if opening_date == yesterday_date:
-                database.delete_by_date(opening_date.isoformat())
+            if opening_date == yest_date:
+                database.delete_nn_by_date(opening_date.isoformat())
         
             data = coerce_data(data)
             database.insert(data)
-            yesterday_date = opening_date
+            yest_date = opening_date
 
     data = database.fetchall()
     df = data_to_dataframe(data)
@@ -199,11 +197,3 @@ if __name__ == '__main__':
     from database import Database
 
     df = merge_xls_with_nn(["data/xls/NN_eszkozalap_hozamok_2026-06-07_2026-06-08.xls"])
-    # df = import_nn_from_xls(src_dir=XLS_DIR, db_file=DB_FILE)
-    # print(f"==========From XLS=========\nShape: {df.shape}\n", df.head(), "\n\n")
-    # chart_df = df.loc[
-    #     (df['opening_date'] >= '2025-12-30') &
-    #     (df['opening_date'] <= '2026-01-10')
-    # ]
-    # print(f"==========FILTERED=========\nShape: {chart_df.shape}\n", chart_df.head(), "\n\n")
-

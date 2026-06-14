@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
+from loguru import logger
+
 import shutil
 import tempfile
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from loguru import logger
 from pathlib import Path
-from random import randint
 from queue import Queue
+from random import randint
 from threading import Event
-from utils import date_generator
 
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
@@ -529,8 +529,8 @@ if __name__ == "__main__":
     setup_logging()
     from loguru import logger
     import argparse
-    import sys
     
+    # import sys
     # pq = Queue()
     # sys.argv.extend([
     #     "--start-date", "2026-06-06",

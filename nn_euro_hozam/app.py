@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 
-# Setup logging before importing other modules
 from logger_config import setup_logging
-from database import Database
 setup_logging()
+from loguru import logger
 
 import argparse
 import streamlit as st
-from loguru import logger
 from pathlib import Path
 
 
@@ -54,11 +52,27 @@ def main(args=None):
         st.session_state.round_digits = args.round_digits
     
     pages = [
-        st.Page(ST_PAGES_DIR / "01_settings.py", title="Settings", icon="⚙️", default=True),
-        st.Page(ST_PAGES_DIR / "02_downloader.py", title="Downloader", icon="📥"),
-        st.Page(ST_PAGES_DIR / "03_dataframe.py", title="Dataframe", icon="📋"),
-        st.Page(ST_PAGES_DIR / "04_asset_yields.py", title="Asset Yields", icon="💰"),
-        st.Page(ST_PAGES_DIR / "05_asset_values.py", title="Asset Values", icon="📈"),
+        st.Page(ST_PAGES_DIR / "01_settings.py",
+            title="Settings",
+            icon="⚙️", 
+            default=True
+        ),
+        st.Page(ST_PAGES_DIR / "02_downloader.py",
+            title="Downloader",
+            icon="📥"
+        ),
+        st.Page(ST_PAGES_DIR / "03_dataframe.py",
+            title="Dataframe",
+            icon="📋"
+        ),
+        st.Page(ST_PAGES_DIR / "04_yields.py",
+            title="Yields",
+            icon="💰"
+        ),
+        st.Page(ST_PAGES_DIR / "05_values.py",
+            title="Values",
+            icon="📈"
+        ),
     ]
     pg = st.navigation(pages)
     pg.run()
@@ -66,14 +80,14 @@ def main(args=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Visualize NN Euro investment asset yield data."
+        description="Visualize NN Euro investment data."
     )
     parser.add_argument(
         "--round-digits",
         type=int,
         default=4,
         required=False,
-        help="Optionally round parsed float values to this many decimal places.",
+        help="Round float to this many decimal places.",
     )
     args = parser.parse_args()
     main(args=args)

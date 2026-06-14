@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
 
+from loguru import logger
+from config import DB_DIR
+from database import (
+    backup_db,
+    save_settings,
+    load_settings,
+)
+from importer import (
+    load_nn_from_db,
+    import_nn_from_csv,
+    import_nn_from_xls,
+)
+
 import streamlit as st
 import time
-from streamlit_lightweight_charts import renderLightweightCharts
-import streamlit_lightweight_charts.dataSamples as data
-from loguru import logger
-from datetime import date, datetime
-
-from config import DB_DIR
-from database import backup_db, save_settings, load_settings
-from importer import load_nn_from_db, import_nn_from_csv, import_nn_from_xls
+from datetime import datetime, date
 from pathlib import Path
 
 
 db_files = sorted(Path(DB_DIR).rglob("*.db"))
 
 if "settings_loaded" not in st.session_state:
+    logger.opt(colors=True).info(f"<green>Loading</green> settings")
     settings = load_settings()
     if settings:
-        for key in settings:
-            value = settings[key]
+        for setting in settings:
+            key = setting["key"]
+            value = setting["value"]
             setattr(st.session_state, key, value)
-            logger.opt(colors=True).debug(f"<green>Restored</green> <yellow>{key}</yellow> to <cyan>{value}</cyan>")
-        logger.opt(colors=True).info(f"<green>Restored</green> settings")
     st.session_state.settings_loaded = True
 
 if "selected_db_file" not in st.session_state:
@@ -37,17 +43,15 @@ def confirm_dialog(fn, msg="OK to Proceed?"):
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Proceed", width='stretch'):
-            logger.opt(colors=True).info("Reloading")
+            logger.opt(colors=True).info("<green>Reloading</green>")
             with st.spinner("Processing..."):
                 df = fn()
                 if df is not None:
-                    logger.opt(colors=True).info("<green>Reloaded</green>")
                     st.session_state.df = df
             st.rerun()
     with col2:
         if st.button("Cancel", width='stretch'):
             st.rerun()
-
 
 st.markdown(
     "<h1 style='text-align: center;'>Settings</h1>",
@@ -55,12 +59,12 @@ st.markdown(
 )
 
 if "df" not in st.session_state:
+    logger.opt(colors=True).info("<green>Loading</green> Dataframe")
     st.session_state.df = load_nn_from_db(st.session_state.selected_db_file)
-    logger.opt(colors=True).info("Dataframe loaded from Database")
 
 ############################## DB SELECTOR BLOCK ##############################
 
-st.subheader("NN Euro Dataframe Source")
+st.subheader("NN Euro Data Source")
 
 col1, col2, col3, col4, col5, col6 = st.columns([6, 1.4, 0.4, 1.4, 0.4, 5])
 
@@ -176,28 +180,31 @@ with col4:
             time.sleep(0.2)
             placeholder.empty()
 
-# End columns section
-st.container()  # forces column context to close
 st.divider(width=1250)
 
 ############################# DATE SELECTOR BLOCK #############################
 
-st.subheader("Start/End Date")
+st.subheader("Dataframe Start/End Date")
 
 df_start, df_end = st.session_state.df["opening_date"].iloc[[0, -1]]
 df_start_date = datetime.strptime(df_start, "%Y-%m-%d").date()
 df_end_date = datetime.strptime(df_end, "%Y-%m-%d").date()
-restored_start_date = date.fromisoformat(st.session_state.get("start_date", df_start))
-restored_end_date = date.fromisoformat(st.session_state.get("end_date", df_end))
 
+restored_start_date = date.fromisoformat(
+    st.session_state.get("start_date", df_start)
+)
+restored_end_date = date.fromisoformat(
+    st.session_state.get("end_date", df_end)
+)
 
 col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1, 1, 3])
+years = list(range(df_start_date.year, df_end_date.year + 1))
 
 with col1:
     start_year = st.selectbox(
         "Start Year",
         options=range(df_start_date.year, df_end_date.year + 1),
-        index=list(range(df_start_date.year, df_end_date.year + 1)).index(restored_start_date.year),
+        index=years.index(restored_start_date.year),
     )
 
 with col2:
@@ -214,7 +221,7 @@ with col4:
     end_year = st.selectbox(
         "End Year",
         options=range(df_start_date.year, df_end_date.year + 1),
-        index=list(range(df_start_date.year, df_end_date.year + 1)).index(restored_end_date.year),
+        index=years.index(restored_end_date.year),
     )
 
 with col5:
@@ -236,8 +243,6 @@ st.session_state.chart_df = st.session_state.df.loc[
     (st.session_state.df['opening_date'] <= st.session_state.end_date)
 ]
 
-# End columns section
-st.container()  # forces column context to close
 st.divider(width=1250)
 
 ############################# ASSET SELECTOR BLOCK ############################
