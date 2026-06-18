@@ -76,13 +76,13 @@ if "selected_asset_group" in st.session_state:
         assets = growth_rates.sort_values(ascending=False).head(5).index.tolist()
 
 if "selected_ma_days" in st.session_state:
-    if st.session_state.selected_ma_days == "50d":
+    if st.session_state.selected_ma_days == "50":
         st.session_state.ma_days = 50
         st.session_state.ma_days_col = "value_ma_50d"
-    elif st.session_state.selected_ma_days == "100d":
+    elif st.session_state.selected_ma_days == "100":
         st.session_state.ma_days = 100
         st.session_state.ma_days_col = "value_ma_100d"
-    elif st.session_state.selected_ma_days == "200d":
+    elif st.session_state.selected_ma_days == "200":
         st.session_state.ma_days = 200
         st.session_state.ma_days_col = "value_ma_200d"
 else:

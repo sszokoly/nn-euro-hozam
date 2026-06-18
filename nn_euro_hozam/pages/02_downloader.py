@@ -3,7 +3,7 @@ from loguru import logger
 import streamlit as st
 import streamlit.components.v1 as components
 import time
-from config import COLORS
+from config import XLS_DIR
 from downloader import download_multiple_xls
 from datetime import date, datetime
 from queue import Queue, Empty
@@ -168,6 +168,7 @@ if "download_start" in st.session_state and "download_end" in st.session_state:
                 df_start, df_end = st.session_state.df["opening_date"].iloc[[0, -1]]
                 st.session_state.df_start = df_start
                 st.session_state.df_end = df_end
+                st.success("Merged new data into dataset")
                 st.rerun()
     
     elif not st.session_state.task_running:
@@ -208,6 +209,7 @@ if "download_start" in st.session_state and "download_end" in st.session_state:
                     "progress_queue": st.session_state.progress_queue,
                     "result_queue": st.session_state.result_queue,
                     "stop_event": st.session_state.stop_event,
+                    "outfile_path": XLS_DIR,
                 }
                 
                 t = Thread(target=download_multiple_xls, kwargs=kwargs, daemon=True)

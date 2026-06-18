@@ -45,7 +45,7 @@ if "selected_asset_group" in st.session_state:
         assets = st.session_state.all_assets
     elif st.session_state.selected_asset_group == "Top 5 Performers":
         assets = (
-            st.session_state.chart_df.groupby('asset')['period_yield_pct_cumprod']
+            st.session_state.chart_df.groupby('asset')['yield_ratio_cumprod']
             .max()
             .sort_values(ascending=False)
             .index[:5]  # Select only the first 5 indices
@@ -60,8 +60,8 @@ for asset in assets:
     
     chart_df = st.session_state.chart_df.loc[
         st.session_state.chart_df['asset'] == asset, 
-        ['opening_date', 'period_yield_pct_cumprod']
-    ].rename(columns={'opening_date': 'time', 'period_yield_pct_cumprod': 'value'})
+        ['closing_date', 'yield_ratio_cumprod']
+    ].rename(columns={'closing_date': 'time', 'yield_ratio_cumprod': 'value'})
 
     chart_df['time'] = chart_df['time'].astype(str)
     chart_df = chart_df.sort_values(by='time').reset_index(drop=True)

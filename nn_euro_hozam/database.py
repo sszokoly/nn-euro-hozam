@@ -26,7 +26,7 @@ class Database():
         self.db_file = db_file if db_file else DB_FILE
         self.nn_table = nn_table if nn_table else DB_NN_TABLE_NAME
         self.st_table = st_table if st_table else DB_ST_TABLE_NAME 
-        if init_db:
+        if init_db or not Path(self.db_file).exists():
             self.init_db()
 
 
@@ -153,12 +153,12 @@ class Database():
         with sqlite3.connect(self.db_file) as conn:
             try:
                 cursor = conn.cursor()
-                self._ensure_table(cursor, table_name)
-
+                cursor.execute(f'DROP TABLE IF EXISTS {table}')
                 logger.opt(colors=True).info(
-                    f"<red>Deleting</red> ALL from TABLE <cyan>{table}</cyan>"
+                    f"<red>Dropped</red> TABLE <cyan>{table}</cyan>"
                 )
-                cursor.execute(f'DELETE FROM {table}')
+                self._ensure_table(cursor, table_name)
+                #cursor.execute(f'DELETE FROM {table}')
             
             except Exception as e:
                 logger.opt(colors=True).exception(f"<red>Exception</red> {e}")
@@ -288,7 +288,7 @@ def load_settings(db_file: str = None) -> dict:
 
 
 if __name__ == '__main__':
-    from logger_config import setup_logging
+    from config import setup_logging
     setup_logging()
     from loguru import logger
     import json
@@ -305,7 +305,7 @@ if __name__ == '__main__':
             'opening_euro_value': 100.0,
             'closing_date': '2026-05-02',
             'closing_euro_value': 105.0,
-            'period_yield_pct': 0.05
+            'yield_ratio': 0.05
         },
         {
             'asset': 'Asset B',
@@ -313,7 +313,7 @@ if __name__ == '__main__':
             'opening_euro_value': 100.0,
             'closing_date': '2026-05-03',
             'closing_euro_value': 101.0,
-            'period_yield_pct': 0.01,
+            'yield_ratio': 0.01,
         },
     ]
     database.insert(nn_data_new)

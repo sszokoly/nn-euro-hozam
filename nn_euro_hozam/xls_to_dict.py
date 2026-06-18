@@ -21,7 +21,7 @@ FIELD_NAMES = (
     "opening_euro_value",
     "closing_date",
     "closing_euro_value",
-    "period_yield_pct",
+    "yield_ratio",
 )
 
 HEADER_MAP = {
@@ -31,7 +31,7 @@ HEADER_MAP = {
     "Kezdő dátum": "opening_date",
     "Záró árfolyam": "closing_euro_value",
     "Záró dátum": "closing_date",
-    "Hozam": "period_yield_pct",
+    "Hozam": "yield_ratio",
 }
 
 
@@ -49,7 +49,7 @@ class YieldRow(BaseModel):
     opening_euro_value: float | None = None
     closing_date: date | None = None
     closing_euro_value: float | None = None
-    period_yield_pct: float | None = None
+    yield_ratio: float | None = None
 
     @field_validator("asset", mode="before")
     @classmethod
@@ -66,10 +66,10 @@ class YieldRow(BaseModel):
     def _validate_float(cls, value: Any) -> float | None:
         return _coerce_float(value)
 
-    @field_validator("period_yield_pct", mode="before")
+    @field_validator("yield_ratio", mode="before")
     @classmethod
-    def _validate_period_yield_pct(cls, value: Any) -> float | None:
-        return _coerce_period_yield_pct(value)
+    def _validate_yield_ratio(cls, value: Any) -> float | None:
+        return _coerce_yield_ratio(value)
 
 
 def _unwrap_cell(value: Any) -> Any:
@@ -143,7 +143,7 @@ def _coerce_float(value: Any) -> float | None:
     raise ValueError("invalid number")
 
 
-def _coerce_period_yield_pct(value: Any) -> float | None:
+def _coerce_yield_ratio(value: Any) -> float | None:
     cell = value if isinstance(value, CellValue) else CellValue(value)
     raw_value = cell.value
 

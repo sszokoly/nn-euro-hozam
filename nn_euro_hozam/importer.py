@@ -11,33 +11,45 @@ from config import (
     ROUND_DIGITS
 )
 
+import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from multiprocessing.util import debug
 from pathlib import Path
 
 
-def value_moving_avg(df, days=90):
-    # Calculate a 90-day rolling average (approx. 3 months)
-    # min_periods=1 ensures you get a value even at the start
+def value_moving_avg(df, days=50):
+    df = df.copy()
+    #df.sort_values(["asset", "closing_date"], inplace=True)
+    
     df[f"value_ma_{days}d"] = (
-        df.groupby("asset")["opening_euro_value"]
-        .rolling(window=days, min_periods=1)
-        .mean()
-        .reset_index(level=0, drop=True) # Align index back to original
+        df.groupby("asset")["closing_euro_value"]
+        .transform(lambda s: s.rolling(window=days, min_periods=days).mean())
     )
     return df
 
 
-def period_yield_pct_cumprod(df, round_digit=ROUND_DIGITS):
-    df["growth_factor"] = 1 + df["period_yield_pct"]
+def yield_moving_avg(df, days=50):
+    df = df.copy()
+    #df.sort_values(["asset", "closing_date"], inplace=True)
+
+    df[f"yield_ma_{days}d"] = (
+        df.groupby("asset")["yield_ratio"]
+        .transform(lambda s: s.rolling(window=days, min_periods=days).mean())
+    )
+
+    return df
+
+
+def yield_ratio_cumprod(df, round_digit=ROUND_DIGITS):
+    df["growth_factor"] = 1 + df["yield_ratio"]
     df["cumulative_growth"] = (
         df.groupby("asset")["growth_factor"]
           .cumprod()
           .round(decimals=round_digit)
     )
-    df["period_yield_pct_cumprod"] = (
-        (df["cumulative_growth"] - 1) * 100).round(decimals=round_digit)
+    df["yield_ratio_cumprod"] = (
+        (df["cumulative_growth"] - 1)).round(decimals=round_digit)
     return df
 
 
@@ -50,7 +62,7 @@ def coerce_data(data) -> list:
             "opening_euro_value": record["opening_euro_value"],
             "closing_date": record["closing_date"].isoformat(),
             "closing_euro_value": record["closing_euro_value"],
-            "period_yield_pct": record["period_yield_pct"]
+            "yield_ratio": record["yield_ratio"]
         }))
     return coerced_data
 
@@ -67,17 +79,45 @@ def ffill_data(data) -> list:
             "opening_euro_value": closing_euro_value,
             "closing_date": next_dt.strftime("%Y-%m-%d"),
             "closing_euro_value": closing_euro_value,
-            "period_yield_pct": 0.0
+            "yield_ratio": 0.0
         }))
     return ffilled_data
 
 
 def data_to_dataframe(data):
     df = pd.DataFrame(data, columns=FIELD_NAMES)
-    df = value_moving_avg(df, 50)
-    df = value_moving_avg(df, 100)
-    df = value_moving_avg(df, 200)
-    df = period_yield_pct_cumprod(df)
+    df = yield_ratio_cumprod(df)
+    for days in [50, 100, 200]:
+        df = value_moving_avg(df, days)
+    for days in [50, 100, 200]:
+        df = yield_moving_avg(df, days)
+    df["ma50_signal"] = np.where(
+        df["value_ma_50d"] < df["closing_euro_value"],
+        "🡻",
+        "🢁"
+    )
+    df["ma100_signal"] = np.where(
+        df["value_ma_100d"] < df["closing_euro_value"],
+        "🡻",
+        "🢁"
+    )
+    df["ma200_signal"] = np.where(
+        df["value_ma_200d"] < df["closing_euro_value"],
+        "🡻",
+        "🢁"
+    )
+    df["ma50_200_signal"] = np.where(
+        df["value_ma_50d"] > df["value_ma_200d"],
+        "🢁",
+        "🡻"
+    )
+    for days in [50, 100, 200]:
+        df[f"ma{days}_diff"] = (
+            df[f"value_ma_{days}d"] - df["closing_euro_value"]
+        )
+        df[f"ma{days}_diff_pct"] = (
+            df[f"ma{days}_diff"] / df["closing_euro_value"]
+        )
     return df
 
 
@@ -191,9 +231,11 @@ def merge_xls_with_nn(
 
 
 if __name__ == '__main__':
-    from logger_config import setup_logging
+    from config import setup_logging
     setup_logging()
     from loguru import logger
     from database import Database
 
-    df = merge_xls_with_nn(["data/xls/NN_eszkozalap_hozamok_2026-06-07_2026-06-08.xls"])
+    import_nn_from_xls()
+    #df = merge_xls_with_nn(["data/xls/NN_eszkozalap_hozamok_2026-06-07_2026-06-08.xls"])
+    

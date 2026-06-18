@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from logger_config import setup_logging
+from config import setup_logging
 setup_logging()
 from loguru import logger
 
