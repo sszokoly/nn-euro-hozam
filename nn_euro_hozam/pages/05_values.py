@@ -76,13 +76,13 @@ if "selected_asset_group" in st.session_state:
         assets = growth_rates.sort_values(ascending=False).head(5).index.tolist()
 
 if "selected_ma_days" in st.session_state:
-    if st.session_state.selected_ma_days == "50":
+    if st.session_state.selected_ma_days == "50d":
         st.session_state.ma_days = 50
         st.session_state.ma_days_col = "value_ma_50d"
-    elif st.session_state.selected_ma_days == "100":
+    elif st.session_state.selected_ma_days == "100d":
         st.session_state.ma_days = 100
         st.session_state.ma_days_col = "value_ma_100d"
-    elif st.session_state.selected_ma_days == "200":
+    elif st.session_state.selected_ma_days == "200d":
         st.session_state.ma_days = 200
         st.session_state.ma_days_col = "value_ma_200d"
 else:
@@ -101,8 +101,8 @@ if "ma_days_col" in st.session_state:
         
         chart_df = st.session_state.chart_df.loc[
             st.session_state.chart_df['asset'] == asset, 
-            ['opening_date', st.session_state.ma_days_col]
-        ].rename(columns={'opening_date': 'time', st.session_state.ma_days_col: 'value'})
+            ['closing_date', st.session_state.ma_days_col]
+        ].rename(columns={'closing_date': 'time', st.session_state.ma_days_col: 'value'})
 
         chart_df['time'] = chart_df['time'].astype(str)
         chart_df = chart_df.sort_values(by='time').reset_index(drop=True)

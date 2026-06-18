@@ -91,31 +91,31 @@ def data_to_dataframe(data):
         df = value_moving_avg(df, days)
     for days in [50, 100, 200]:
         df = yield_moving_avg(df, days)
-    df["ma50_signal"] = np.where(
-        df["value_ma_50d"] < df["closing_euro_value"],
-        "🡻",
-        "🢁"
-    )
-    df["ma100_signal"] = np.where(
-        df["value_ma_100d"] < df["closing_euro_value"],
-        "🡻",
-        "🢁"
-    )
-    df["ma200_signal"] = np.where(
-        df["value_ma_200d"] < df["closing_euro_value"],
-        "🡻",
-        "🢁"
-    )
-    df["ma50_200_signal"] = np.where(
-        df["value_ma_50d"] > df["value_ma_200d"],
-        "🢁",
-        "🡻"
-    )
+    # df["ma50_signal"] = np.where(
+    #     df["value_ma_50d"] < df["closing_euro_value"],
+    #     "🡻",
+    #     "🢁"
+    # )
+    # df["ma100_signal"] = np.where(
+    #     df["value_ma_100d"] < df["closing_euro_value"],
+    #     "🡻",
+    #     "🢁"
+    # )
+    # df["ma200_signal"] = np.where(
+    #     df["value_ma_200d"] < df["closing_euro_value"],
+    #     "🡻",
+    #     "🢁"
+    # )
+    # df["ma50_200_signal"] = np.where(
+    #     df["value_ma_50d"] > df["value_ma_200d"],
+    #     "🢁",
+    #     "🡻"
+    # )
     for days in [50, 100, 200]:
         df[f"ma{days}_diff"] = (
             df[f"value_ma_{days}d"] - df["closing_euro_value"]
         )
-        df[f"ma{days}_diff_pct"] = (
+        df[f"ma{days}_diff_ratio"] = (
             df[f"ma{days}_diff"] / df["closing_euro_value"]
         )
     return df

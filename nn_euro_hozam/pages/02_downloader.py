@@ -247,3 +247,4 @@ with col1:
         progress_monitor()
     elif not st.session_state.result_queue.empty():
         st.warning("Click on 'Merge' when download is completed!")
+        st.warning("Don't forget to also do a Backup!")
