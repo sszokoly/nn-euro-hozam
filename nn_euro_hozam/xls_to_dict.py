@@ -117,7 +117,7 @@ def _coerce_date(value: Any) -> datetime | None:
             text,
         )
         if regular_match:
-            year, month, day = (int(part) for part in hungarian_match.groups())
+            year, month, day = (int(part) for part in regular_match.groups())
             return date(year, month, day)
 
     raise ValueError("invalid date")

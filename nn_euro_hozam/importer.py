@@ -13,6 +13,7 @@ from config import (
 
 import numpy as np
 import pandas as pd
+from analytics import daily_prices
 from datetime import datetime, timedelta
 from multiprocessing.util import debug
 from pathlib import Path
@@ -20,37 +21,69 @@ from pathlib import Path
 
 def value_moving_avg(df, days=50):
     df = df.copy()
-    #df.sort_values(["asset", "closing_date"], inplace=True)
+    df.sort_values(["asset", "closing_date"], inplace=True)
     
     df[f"value_ma_{days}d"] = (
         df.groupby("asset")["closing_euro_value"]
         .transform(lambda s: s.rolling(window=days, min_periods=days).mean())
     )
-    return df
+    return df.sort_values("id").reset_index(drop=True)
 
 
 def yield_moving_avg(df, days=50):
     df = df.copy()
-    #df.sort_values(["asset", "closing_date"], inplace=True)
+    df.sort_values(["asset", "closing_date"], inplace=True)
 
     df[f"yield_ma_{days}d"] = (
         df.groupby("asset")["yield_ratio"]
         .transform(lambda s: s.rolling(window=days, min_periods=days).mean())
     )
+    return df.sort_values("id").reset_index(drop=True)
 
-    return df
+
+def rolling_compounded_return(df, days=50):
+    df = df.copy()
+    df = df.sort_values(["asset", "closing_date"])
+
+    df[f"rolling_return_{days}d"] = (
+        df.groupby("asset")["yield_ratio"]
+        .transform(
+            lambda s: (
+                (1 + s)
+                .rolling(window=days, min_periods=days)
+                .apply(np.prod, raw=True)
+                - 1
+            )
+        )
+    )
+
+    return df.sort_values("id").reset_index(drop=True)
+
+
+def yield_moving_volatility(df, days=50):
+    df = df.copy()
+    df.sort_values(["asset", "closing_date"], inplace=True)
+
+    df[f"yield_volatility_{days}d"] = (
+        df.groupby("asset")["yield_ratio"]
+        .transform(lambda s: s.rolling(window=days, min_periods=days).std())
+    )
+
+    return df.sort_values("id").reset_index(drop=True)
 
 
 def yield_ratio_cumprod(df, round_digit=ROUND_DIGITS):
+    df = df.copy()
+    df = df.sort_values(["asset", "closing_date"])
+
     df["growth_factor"] = 1 + df["yield_ratio"]
     df["cumulative_growth"] = (
         df.groupby("asset")["growth_factor"]
           .cumprod()
-          .round(decimals=round_digit)
     )
     df["yield_ratio_cumprod"] = (
-        (df["cumulative_growth"] - 1)).round(decimals=round_digit)
-    return df
+        df["cumulative_growth"] - 1)
+    return df.sort_values("id").reset_index(drop=True)
 
 
 def coerce_data(data) -> list:
@@ -86,31 +119,21 @@ def ffill_data(data) -> list:
 
 def data_to_dataframe(data):
     df = pd.DataFrame(data, columns=FIELD_NAMES)
+    if df.empty:
+        return df
+    prices = daily_prices(df)
+    df = prices.rename_axis(index="closing_date", columns="asset").stack().rename("closing_euro_value").reset_index()
+    df["opening_euro_value"] = df.groupby("asset").closing_euro_value.shift()
+    df["opening_euro_value"] = df.opening_euro_value.fillna(df.closing_euro_value)
+    df["yield_ratio"] = df.closing_euro_value / df.opening_euro_value - 1
+    df["closing_date"] = df.closing_date.dt.strftime("%Y-%m-%d")
+    df["opening_date"] = df.closing_date
+    df["id"] = range(1, len(df) + 1)
     df = yield_ratio_cumprod(df)
     for days in [50, 100, 200]:
         df = value_moving_avg(df, days)
-    for days in [50, 100, 200]:
+        df = rolling_compounded_return(df, days)
         df = yield_moving_avg(df, days)
-    # df["ma50_signal"] = np.where(
-    #     df["value_ma_50d"] < df["closing_euro_value"],
-    #     "🡻",
-    #     "🢁"
-    # )
-    # df["ma100_signal"] = np.where(
-    #     df["value_ma_100d"] < df["closing_euro_value"],
-    #     "🡻",
-    #     "🢁"
-    # )
-    # df["ma200_signal"] = np.where(
-    #     df["value_ma_200d"] < df["closing_euro_value"],
-    #     "🡻",
-    #     "🢁"
-    # )
-    # df["ma50_200_signal"] = np.where(
-    #     df["value_ma_50d"] > df["value_ma_200d"],
-    #     "🢁",
-    #     "🡻"
-    # )
     for days in [50, 100, 200]:
         df[f"ma{days}_diff"] = (
             df[f"value_ma_{days}d"] - df["closing_euro_value"]
@@ -118,6 +141,26 @@ def data_to_dataframe(data):
         df[f"ma{days}_diff_ratio"] = (
             df[f"ma{days}_diff"] / df["closing_euro_value"]
         )
+    for days in [50, 100, 200]:
+        df = yield_moving_volatility(df, days)
+
+    # df["ma50_signal"] = np.where(
+    #     df["value_ma_50d"] < df["closing_euro_value"],
+    #     "🡻", "🢁"
+    # )
+    # df["ma100_signal"] = np.where(
+    #     df["value_ma_100d"] < df["closing_euro_value"],
+    #     "🡻", "🢁"
+    # )
+    # df["ma200_signal"] = np.where(
+    #     df["value_ma_200d"] < df["closing_euro_value"],
+    #     "🡻", "🢁"
+    # )
+    # df["ma50_200_signal"] = np.where(
+    #     df["value_ma_50d"] > df["value_ma_200d"],
+    #     "🢁", "🡻"
+    # )
+
     return df
 
 
@@ -134,7 +177,7 @@ def import_nn_from_xls(
     
     for filepath in xls_files:
         logger.opt(colors=True).debug(f"Loading <yellow>{filepath}</yellow>")
-        opening_date, closing_date, data = xls_to_dict(filepath, round_digits)
+        opening_date, closing_date, data = xls_to_dict(filepath, None)
         
         if not opening_date and not closing_date:
             if yest_date:
@@ -170,7 +213,7 @@ def import_nn_from_csv(csv_file=CSV_FILE):
         logger.error(f"CSV file not found: {csv_file}")
         return None
     df = pd.read_csv(csv_file)
-    return df
+    return data_to_dataframe(df[list(FIELD_NAMES)].itertuples(index=False, name=None))
 
 
 def load_nn_from_db(db_file=DB_FILE):
@@ -199,7 +242,7 @@ def merge_xls_with_nn(
             continue
         
         logger.opt(colors=True).info(f"Loading <yellow>{filepath}</yellow>")
-        opening_date, closing_date, data = xls_to_dict(filepath, round_digits)
+        opening_date, closing_date, data = xls_to_dict(filepath, None)
 
         if not opening_date and not closing_date:
             if yest_date:

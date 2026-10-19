@@ -226,7 +226,10 @@ AGENTS.md
 uv.lock
 data/xls/*
 data/tmp/*
+nn_euro_hozam/data/debug/
 *.xls
 test-results/*
 launch.json
 nn.log
+openspec/*
+tests/*

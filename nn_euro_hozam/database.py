@@ -158,7 +158,6 @@ class Database():
                     f"<red>Dropped</red> TABLE <cyan>{table}</cyan>"
                 )
                 self._ensure_table(cursor, table_name)
-                #cursor.execute(f'DELETE FROM {table}')
             
             except Exception as e:
                 logger.opt(colors=True).exception(f"<red>Exception</red> {e}")
@@ -228,6 +227,7 @@ class Database():
             f"Invalid {table_name} 'table_name' provided, "
             f"valid arguments are: 'nn' or 'st'"
         )
+
 
     @staticmethod
     def _create_columns_def(schema: list) -> list:

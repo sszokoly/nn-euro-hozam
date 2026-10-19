@@ -15,6 +15,7 @@ from importer import (
 
 import streamlit as st
 import time
+from calendar import monthrange
 from datetime import datetime, date
 from pathlib import Path
 
@@ -232,7 +233,7 @@ with col5:
         index=restored_end_date.month - 1,
     )
 
-end_date = date(end_year, end_month, 1)
+end_date = date(end_year, end_month, monthrange(end_year, end_month)[1])
 
 st.session_state.df_start = df_start
 st.session_state.df_end = df_end

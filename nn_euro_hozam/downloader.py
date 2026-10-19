@@ -7,13 +7,15 @@ import tempfile
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+import json
 from pathlib import Path
 from queue import Queue
 from random import randint
 from threading import Event
+import traceback
 
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
 from selenium.webdriver import ChromeOptions
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
@@ -28,6 +30,8 @@ PRODUCT_VALUE = "31866"
 
 DEFAULT_TIMEOUT_SECONDS = 30
 DOWNLOAD_TIMEOUT_SECONDS = 60
+DIAGNOSTIC_BUNDLE_LIMIT = 10
+DEBUG_DIR = Path(__file__).parent / "data" / "debug"
 
 class Selectors:
     accept_cookies_button = "#onetrust-accept-btn-handler"
@@ -42,6 +46,8 @@ class Selectors:
     to_date_year = "#_yieldchartportlet_WAR_nnportlet_displayedPeriodToYear"
     date_set_by_user = "#_yieldchartportlet_WAR_nnportlet_dateSetByUser"
     table_view_button = "#_yieldchartportlet_WAR_nnportlet_yieldChartShowTable"
+    table_container = "#_yieldchartportlet_WAR_nnportlet_tableContainer"
+    yield_submit_button = "#_yieldchartportlet_WAR_nnportlet_yieldChartSubmitButton"
     asset_funds_checkbox_group = (
         "#_yieldchartportlet_WAR_nnportlet_assetFundsCheckboxGroup"
     )
@@ -53,6 +59,9 @@ class Selectors:
     select_all_label = "#_yieldchartportlet_WAR_nnportlet_select-all-checkbox-label"
     table_download_button = (
         "#_yieldchartportlet_WAR_nnportlet_downloaderButtonInTableView button"
+    )
+    table_download_container = (
+        "#_yieldchartportlet_WAR_nnportlet_downloaderButtonInTableView"
     )
 
 
@@ -245,6 +254,145 @@ def _set_date(
     )
 
 
+def _read_yield_page_state(driver: WebDriver) -> dict:
+    return driver.execute_script(
+        """
+        const product = document.querySelector(arguments[0]);
+        const fromDate = document.querySelector(arguments[1]);
+        const toDate = document.querySelector(arguments[2]);
+        const table = document.querySelector(arguments[3]);
+        const downloadContainer = document.querySelector(arguments[4]);
+        const downloadButton = document.querySelector(arguments[5]);
+
+        const visible = element => {
+            if (!element) return false;
+            const style = window.getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            return style.display !== 'none' && style.visibility !== 'hidden' &&
+                rect.width > 0 && rect.height > 0;
+        };
+
+        return {
+            productValue: product ? product.value : null,
+            productText: product && product.selectedOptions.length
+                ? product.selectedOptions[0].textContent.trim() : null,
+            fromDate: fromDate ? fromDate.value : null,
+            toDate: toDate ? toDate.value : null,
+            tableVisible: visible(table),
+            downloadContainerVisible: visible(downloadContainer),
+            downloadButtonVisible: visible(downloadButton),
+            downloadButtonEnabled: Boolean(downloadButton) && !downloadButton.disabled,
+        };
+        """,
+        Selectors.product_select,
+        Selectors.from_date_input,
+        Selectors.to_date_input,
+        Selectors.table_container,
+        Selectors.table_download_container,
+        Selectors.table_download_button,
+    )
+
+
+def _wait_for_requested_inputs(
+    driver: WebDriver, start: DateParts, end: DateParts
+) -> None:
+    expected = {
+        "productValue": PRODUCT_VALUE,
+        "productText": PRODUCT_NAME,
+        "fromDate": start.display_value,
+        "toDate": end.display_value,
+    }
+    last_state = None
+
+    def inputs_match(active_driver: WebDriver) -> bool:
+        nonlocal last_state
+        last_state = _read_yield_page_state(active_driver)
+        return all(last_state.get(key) == value for key, value in expected.items())
+
+    try:
+        WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(inputs_match)
+    except TimeoutException as exc:
+        raise RuntimeError(
+            "NN did not apply requested product/date state "
+            f"for {PRODUCT_NAME} ({PRODUCT_VALUE}), "
+            f"{start.display_value} to {end.display_value}: {last_state}"
+        ) from exc
+
+
+def _wait_for_table_download_ready(
+    driver: WebDriver, start: DateParts, end: DateParts
+) -> None:
+    last_state = None
+
+    def download_is_ready(active_driver: WebDriver) -> bool:
+        nonlocal last_state
+        last_state = _read_yield_page_state(active_driver)
+        return all(
+            last_state.get(key)
+            for key in (
+                "tableVisible",
+                "downloadContainerVisible",
+                "downloadButtonVisible",
+                "downloadButtonEnabled",
+            )
+        )
+
+    try:
+        WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(download_is_ready)
+    except TimeoutException as exc:
+        raise RuntimeError(
+            "NN did not expose a usable XLS download control "
+            f"for {PRODUCT_NAME} ({PRODUCT_VALUE}), "
+            f"{start.display_value} to {end.display_value}: {last_state}"
+        ) from exc
+
+
+def _submit_yield_form(driver: WebDriver, start: DateParts, end: DateParts) -> None:
+    def submit_if_ready(active_driver: WebDriver) -> bool:
+        try:
+            button = active_driver.find_element(
+                By.CSS_SELECTOR, Selectors.yield_submit_button
+            )
+            if not button.is_displayed() or not button.is_enabled():
+                return False
+            button.click()
+            return True
+        except StaleElementReferenceException:
+            return False
+
+    try:
+        WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(submit_if_ready)
+    except TimeoutException as exc:
+        raise RuntimeError(
+            "NN did not expose an enabled yield-form submit control "
+            f"for {PRODUCT_NAME} ({PRODUCT_VALUE}), "
+            f"{start.display_value} to {end.display_value}"
+        ) from exc
+
+
+def _click_table_download(driver: WebDriver, start: DateParts, end: DateParts) -> None:
+    def click_ready_download(active_driver: WebDriver) -> bool:
+        try:
+            button = active_driver.find_element(
+                By.CSS_SELECTOR, Selectors.table_download_button
+            )
+            if not button.is_displayed() or not button.is_enabled():
+                return False
+            button.click()
+            return True
+        except StaleElementReferenceException:
+            return False
+
+    try:
+        WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(click_ready_download)
+    except TimeoutException as exc:
+        raise RuntimeError(
+            "NN could not click a usable XLS download control "
+            f"for {PRODUCT_NAME} ({PRODUCT_VALUE}), "
+            f"{start.display_value} to {end.display_value}"
+        ) from exc
+
+
 def _select_all_asset_funds(driver: WebDriver) -> None:
     _wait_for_css(driver, Selectors.asset_funds_checkbox_group)
     WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(
@@ -276,6 +424,10 @@ def _select_all_asset_funds(driver: WebDriver) -> None:
 
         if (selectAllLabel) {
             selectAllLabel.textContent = 'Kijelölések megszüntetése';
+        }
+
+        if (typeof window._yieldchartportlet_WAR_nnportlet_toggleButtonAndLabelState === 'function') {
+            window._yieldchartportlet_WAR_nnportlet_toggleButtonAndLabelState();
         }
 
         return checkboxes.filter(checkbox => checkbox.checked).length;
@@ -314,6 +466,142 @@ def _wait_for_download(
     raise TimeoutError(f"Download did not complete within {timeout} seconds")
 
 
+def _control_state(driver: WebDriver, selector: str) -> dict:
+    return driver.execute_script(
+        """
+        const element = document.querySelector(arguments[0]);
+        if (!element) {
+            return { selector: arguments[0], found: false };
+        }
+
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return {
+            selector: arguments[0],
+            found: true,
+            tagName: element.tagName,
+            text: element.textContent.trim(),
+            disabled: Boolean(element.disabled),
+            visible: style.display !== 'none' && style.visibility !== 'hidden' &&
+                rect.width > 0 && rect.height > 0,
+            outerHtml: element.outerHTML,
+            bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        };
+        """,
+        selector,
+    )
+
+
+def _prune_diagnostic_bundles(debug_dir: Path) -> None:
+    bundles = sorted(
+        (item for item in debug_dir.iterdir() if item.is_dir()),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for bundle in bundles[DIAGNOSTIC_BUNDLE_LIMIT:]:
+        shutil.rmtree(bundle)
+
+
+def _capture_failure_diagnostics(
+    driver: WebDriver,
+    exception: Exception,
+    start_date: date,
+    end_date: date,
+    attempt_number: int,
+) -> Path | None:
+    try:
+        DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        bundle = DEBUG_DIR / (
+            f"failure-{datetime.now().strftime('%Y%m%dT%H%M%S_%f')}-"
+            f"attempt-{attempt_number}"
+        )
+        bundle.mkdir()
+    except OSError as capture_error:
+        logger.opt(colors=False).error(
+            "Unable to create Selenium diagnostic bundle: {}", capture_error
+        )
+        return None
+
+    collection_errors = {}
+    metadata = {
+        "attempt_number": attempt_number,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "exception": str(exception),
+        "collection_errors": collection_errors,
+    }
+
+    try:
+        (bundle / "exception.txt").write_text(
+            "".join(
+                traceback.format_exception(
+                    type(exception), exception, exception.__traceback__
+                )
+            ),
+            encoding="utf-8",
+        )
+    except OSError as capture_error:
+        collection_errors["exception"] = str(capture_error)
+
+    def collect(name: str, collector) -> None:
+        try:
+            metadata[name] = collector()
+        except Exception as capture_error:
+            collection_errors[name] = str(capture_error)
+
+    collect("url", lambda: driver.current_url)
+    collect("title", lambda: driver.title)
+    collect("capabilities", lambda: driver.capabilities)
+    collect("controls", lambda: {
+        "table_view_button": _control_state(driver, Selectors.table_view_button),
+        "asset_funds_checkbox_group": _control_state(
+            driver, Selectors.asset_funds_checkbox_group
+        ),
+        "table_download_button": _control_state(
+            driver, Selectors.table_download_button
+        ),
+    })
+
+    try:
+        if not driver.save_screenshot(str(bundle / "screenshot.png")):
+            raise RuntimeError("Browser did not save a screenshot")
+    except Exception as capture_error:
+        collection_errors["screenshot"] = str(capture_error)
+
+    try:
+        (bundle / "page.html").write_text(driver.page_source, encoding="utf-8")
+    except Exception as capture_error:
+        collection_errors["page_html"] = str(capture_error)
+
+    try:
+        (bundle / "browser-console.json").write_text(
+            json.dumps(driver.get_log("browser"), indent=2, default=str),
+            encoding="utf-8",
+        )
+    except Exception as capture_error:
+        collection_errors["browser_console"] = str(capture_error)
+
+    try:
+        (bundle / "metadata.json").write_text(
+            json.dumps(metadata, indent=2, default=str), encoding="utf-8"
+        )
+    except OSError as capture_error:
+        logger.opt(colors=False).error(
+            "Unable to save Selenium diagnostic metadata in {}: {}",
+            bundle,
+            capture_error,
+        )
+
+    try:
+        _prune_diagnostic_bundles(DEBUG_DIR)
+    except OSError as capture_error:
+        logger.opt(colors=False).error(
+            "Unable to prune Selenium diagnostic bundles: {}", capture_error
+        )
+
+    return bundle
+
+
 def _resolve_outfile_path(
     downloaded_file: Path, outfile_path: str | Path | None
 ) -> Path:
@@ -333,6 +621,7 @@ def download_xls(
     end_date: date | datetime | str | None = None,
     outfile_path: str | Path | None = None,
     append_timestamp: bool = False,
+    attempt_number: int = 1,
 ) -> Path:
     """Download NN Euro Alap yield spreadsheet using headless Selenium Chromium.
 
@@ -370,21 +659,31 @@ def download_xls(
                 Selectors.to_date_year,
                 end_parts,
             )
+            _wait_for_requested_inputs(driver, start_parts, end_parts)
+
+            _select_all_asset_funds(driver)
+            _submit_yield_form(driver, start_parts, end_parts)
 
             WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(
                 EC.element_to_be_clickable(
                     (By.CSS_SELECTOR, Selectors.table_view_button)
                 )
             ).click()
-            _select_all_asset_funds(driver)
-
-            WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(
-                EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, Selectors.table_download_button)
-                )
-            ).click()
+            _wait_for_table_download_ready(driver, start_parts, end_parts)
+            _click_table_download(driver, start_parts, end_parts)
 
             downloaded_file = _wait_for_download(download_dir)
+        except Exception as exception:
+            diagnostic_bundle = _capture_failure_diagnostics(
+                driver,
+                exception,
+                resolved_start_date,
+                resolved_end_date,
+                attempt_number,
+            )
+            if diagnostic_bundle is not None:
+                exception.add_note(f"Selenium diagnostics saved to {diagnostic_bundle}")
+            raise
         finally:
             driver.quit()
 
@@ -471,7 +770,8 @@ def download_multiple_xls(
                             start_date=start.isoformat(),
                             end_date=end.isoformat(),
                             outfile_path=outfile_path,
-                            append_timestamp=append_timestamp
+                            append_timestamp=append_timestamp,
+                            attempt_number=attempt + 1,
                         )
                         
                         downloaded_files.append(output_path)
@@ -495,9 +795,23 @@ def download_multiple_xls(
                         break
                     
                     except Exception as e:
-                        logger.opt(colors=True).debug(
-                            f"Exception in download for {start_end}: <red>{e}</red>"
+                        diagnostic_bundle = next(
+                            (
+                                note.removeprefix("Selenium diagnostics saved to ")
+                                for note in getattr(e, "__notes__", [])
+                                if note.startswith("Selenium diagnostics saved to ")
+                            ),
+                            None,
                         )
+                        logger.opt(colors=False).debug(
+                            "Exception in download for {}: {}", start_end, e
+                        )
+                        if diagnostic_bundle:
+                            logger.opt(colors=False).error(
+                                "Selenium diagnostics for {} saved to {}",
+                                start_end,
+                                diagnostic_bundle,
+                            )
                         
                         attempt += 1
                         if attempt < retries:
@@ -519,7 +833,7 @@ def download_multiple_xls(
     finally:
         if progress_queue:
             progress_queue.put("done")
-            logger.opt(colors=True).info(f"Put <cyan>done</cyan> in the progress_queue")
+            logger.opt(colors=True).info("Put <cyan>done</cyan> in the progress_queue")
         if result_queue:
             result_queue.put(downloaded_files)
 

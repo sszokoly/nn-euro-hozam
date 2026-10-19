@@ -53,7 +53,7 @@ def date_generator(
 
 
 if __name__ == '__main__':
-    from logger_config import setup_logging
+    from config import setup_logging
     setup_logging()
     from loguru import logger
     
