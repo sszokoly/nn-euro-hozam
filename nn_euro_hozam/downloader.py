@@ -6,8 +6,10 @@ import shutil
 import tempfile
 import time
 from dataclasses import dataclass
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta
 import json
+import math
 from pathlib import Path
 from queue import Queue
 from random import randint
@@ -29,13 +31,26 @@ PRODUCT_NAME = "Euro Alap rendszeres díjas"
 PRODUCT_VALUE = "31866"
 
 DEFAULT_TIMEOUT_SECONDS = 30
+NAVIGATION_TIMEOUT_SECONDS = 60
+COMMAND_TIMEOUT_SECONDS = 120
 DOWNLOAD_TIMEOUT_SECONDS = 60
 DIAGNOSTIC_BUNDLE_LIMIT = 10
 DEBUG_DIR = Path(__file__).parent / "data" / "debug"
+_CURRENT_ATTEMPT = ContextVar("yield_download_attempt", default=None)
+
+
+def _enter_stage(stage: str) -> str:
+    context = _CURRENT_ATTEMPT.get()
+    if context is not None:
+        context.update(stage=stage, stage_started=time.monotonic())
+    return stage
 
 class Selectors:
     accept_cookies_button = "#onetrust-accept-btn-handler"
     product_select = "#_yieldchartportlet_WAR_nnportlet_selectedProduct"
+    product_label = ".product-selector .cs-placeholder"
+    product_option = f'.product-selector .cs-options li[data-value="{PRODUCT_VALUE}"]'
+    application_error = "#_yieldchartportlet_WAR_nnportlet_errorMessage"
     from_date_input = "#_yieldchartportlet_WAR_nnportlet_displayedPeriodFrom"
     from_date_day = "#_yieldchartportlet_WAR_nnportlet_displayedPeriodFromDay"
     from_date_month = "#_yieldchartportlet_WAR_nnportlet_displayedPeriodFromMonth"
@@ -120,6 +135,7 @@ def _to_hungarian_date_parts(value: date) -> DateParts:
 
 def _build_driver(download_dir: Path) -> WebDriver:
     options = ChromeOptions()
+    options.page_load_strategy = "eager"
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -135,11 +151,26 @@ def _build_driver(download_dir: Path) -> WebDriver:
     )
 
     driver = webdriver.Chrome(options=options)
-    driver.execute_cdp_cmd(
-        "Page.setDownloadBehavior",
-        {"behavior": "allow", "downloadPath": str(download_dir)},
-    )
+    try:
+        driver.command_executor.client_config.timeout = COMMAND_TIMEOUT_SECONDS
+        driver.set_page_load_timeout(NAVIGATION_TIMEOUT_SECONDS)
+        driver.set_script_timeout(DEFAULT_TIMEOUT_SECONDS)
+        driver.execute_cdp_cmd(
+            "Page.setDownloadBehavior",
+            {"behavior": "allow", "downloadPath": str(download_dir)},
+        )
+    except Exception:
+        _close_driver(driver)
+        raise
     return driver
+
+
+def _close_driver(driver: WebDriver) -> None:
+    """Cleanup must not replace a failed attempt or discard a completed file."""
+    try:
+        driver.quit()
+    except Exception as error:
+        logger.opt(colors=False).warning("Browser cleanup failed: {}", error)
 
 
 def _wait_for_css(
@@ -164,44 +195,47 @@ def _click_if_visible(driver: WebDriver, selector: str, timeout: int = 5) -> Non
 
 
 def _select_product(driver: WebDriver) -> None:
-    selected_value = driver.execute_script(
-        """
-        const selector = arguments[0];
-        const productName = arguments[1];
-        const productValue = arguments[2];
-        const select = document.querySelector(selector);
+    # The visible widget updates its label and initiates the fund request. Never
+    # replay its activation from a readiness predicate or call its handler twice.
+    before = _read_yield_page_state(driver)
+    try:
+        _click_control(driver, Selectors.product_label)
+        _click_control(driver, Selectors.product_option)
+        _wait_for_state(driver, "product activation", _product_is_ready)
+    except Exception as exception:
+        exception.product_state_before = before
+        raise
 
-        if (!select) {
-            throw new Error(`Product select not found: ${selector}`);
-        }
 
-        const option = Array.from(select.options).find(
-            item => item.value === productValue && item.textContent.trim() === productName
-        );
-
-        if (!option) {
-            throw new Error(`Product option not found: ${productName} (${productValue})`);
-        }
-
-        select.value = option.value;
-        select.dispatchEvent(new Event('input', { bubbles: true }));
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-
-        if (typeof window._yieldchartportlet_WAR_nnportlet_productOnChange === 'function') {
-            window._yieldchartportlet_WAR_nnportlet_productOnChange();
-        }
-
-        return select.value;
-        """,
-        Selectors.product_select,
-        PRODUCT_NAME,
-        PRODUCT_VALUE,
+def _product_is_ready(state: dict) -> bool:
+    if state.get("applicationError"):
+        error = RuntimeError(
+            f"NN product activation failed for {PRODUCT_NAME} ({PRODUCT_VALUE}): "
+            f"{state['applicationError']}"
+        )
+        error.last_yield_state = state
+        raise error
+    return (
+        state.get("productValue") == PRODUCT_VALUE
+        and state.get("productText") == PRODUCT_NAME
+        and state.get("productLabel") == PRODUCT_NAME
+        and state.get("productLabelVisible")
+        and state.get("fundGroupVisible")
+        and state.get("fundCount", 0) > 0
+        and not state.get("loading")
     )
 
-    if selected_value != PRODUCT_VALUE:
-        raise RuntimeError(
-            f"Expected selected product {PRODUCT_VALUE}, got {selected_value}"
-        )
+
+def _dismiss_cookie_banner(driver: WebDriver) -> None:
+    _click_if_visible(driver, Selectors.accept_cookies_button, timeout=0)
+
+
+def _click_control(driver: WebDriver, selector: str) -> None:
+    def clickable(active_driver):
+        _dismiss_cookie_banner(active_driver)
+        return EC.element_to_be_clickable((By.CSS_SELECTOR, selector))(active_driver)
+
+    WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(clickable).click()
 
 
 def _set_date(
@@ -255,7 +289,7 @@ def _set_date(
 
 
 def _read_yield_page_state(driver: WebDriver) -> dict:
-    return driver.execute_script(
+    state = driver.execute_script(
         """
         const product = document.querySelector(arguments[0]);
         const fromDate = document.querySelector(arguments[1]);
@@ -263,6 +297,10 @@ def _read_yield_page_state(driver: WebDriver) -> dict:
         const table = document.querySelector(arguments[3]);
         const downloadContainer = document.querySelector(arguments[4]);
         const downloadButton = document.querySelector(arguments[5]);
+        const productLabel = document.querySelector(arguments[6]);
+        const funds = Array.from(document.querySelectorAll(arguments[7]));
+        const error = document.querySelector(arguments[8]);
+        const fundGroup = document.querySelector(arguments[9]);
 
         const visible = element => {
             if (!element) return false;
@@ -273,6 +311,21 @@ def _read_yield_page_state(driver: WebDriver) -> dict:
         };
 
         return {
+            documentReadyState: document.readyState,
+            requiredFunctions: {
+                productOnChange: typeof window._yieldchartportlet_WAR_nnportlet_productOnChange === 'function',
+                toggleButtonAndLabelState: typeof window._yieldchartportlet_WAR_nnportlet_toggleButtonAndLabelState === 'function',
+            },
+            productControlPresent: Boolean(product),
+            dateControlsPresent: Boolean(fromDate && toDate),
+            productLabelVisible: visible(productLabel),
+            productLabel: productLabel ? productLabel.textContent.trim() : null,
+            fundCount: funds.length,
+            fundIds: funds.map(item => item.value),
+            fundGroupVisible: visible(fundGroup),
+            applicationError: visible(error) ? error.textContent.trim() : '',
+            loading: fundGroup && fundGroup.hasAttribute('aria-busy')
+                ? fundGroup.getAttribute('aria-busy') === 'true' : null,
             productValue: product ? product.value : null,
             productText: product && product.selectedOptions.length
                 ? product.selectedOptions[0].textContent.trim() : null,
@@ -290,6 +343,42 @@ def _read_yield_page_state(driver: WebDriver) -> dict:
         Selectors.table_container,
         Selectors.table_download_container,
         Selectors.table_download_button,
+        Selectors.product_label,
+        Selectors.asset_fund_checkboxes,
+        Selectors.application_error,
+        Selectors.asset_funds_checkbox_group,
+    )
+    context = _CURRENT_ATTEMPT.get()
+    if context is not None:
+        context["last_state"] = state
+    return state
+
+
+def _wait_for_state(driver: WebDriver, stage: str, predicate) -> dict:
+    """Poll observations without repeating the action that initiated a change."""
+    last_state = None
+
+    def ready(active_driver):
+        nonlocal last_state
+        last_state = _read_yield_page_state(active_driver)
+        return last_state if predicate(last_state) else False
+
+    try:
+        return WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(ready)
+    except TimeoutException as exc:
+        error = RuntimeError(f"NN {stage} did not become ready: {last_state}")
+        error.download_stage = stage
+        error.last_yield_state = last_state
+        raise error from exc
+
+
+def _wait_for_application_ready(driver: WebDriver) -> dict:
+    return _wait_for_state(
+        driver, "application readiness",
+        lambda state: all(state.get("requiredFunctions", {}).get(name) for name in (
+            "productOnChange", "toggleButtonAndLabelState",
+        )) and state.get("productControlPresent") and state.get("dateControlsPresent")
+        and state.get("productLabelVisible"),
     )
 
 
@@ -307,7 +396,9 @@ def _wait_for_requested_inputs(
     def inputs_match(active_driver: WebDriver) -> bool:
         nonlocal last_state
         last_state = _read_yield_page_state(active_driver)
-        return all(last_state.get(key) == value for key, value in expected.items())
+        return _product_is_ready(last_state) and all(
+            last_state.get(key) == value for key, value in expected.items()
+        )
 
     try:
         WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(inputs_match)
@@ -350,6 +441,7 @@ def _wait_for_table_download_ready(
 def _submit_yield_form(driver: WebDriver, start: DateParts, end: DateParts) -> None:
     def submit_if_ready(active_driver: WebDriver) -> bool:
         try:
+            _dismiss_cookie_banner(active_driver)
             button = active_driver.find_element(
                 By.CSS_SELECTOR, Selectors.yield_submit_button
             )
@@ -373,6 +465,7 @@ def _submit_yield_form(driver: WebDriver, start: DateParts, end: DateParts) -> N
 def _click_table_download(driver: WebDriver, start: DateParts, end: DateParts) -> None:
     def click_ready_download(active_driver: WebDriver) -> bool:
         try:
+            _dismiss_cookie_banner(active_driver)
             button = active_driver.find_element(
                 By.CSS_SELECTOR, Selectors.table_download_button
             )
@@ -509,6 +602,12 @@ def _capture_failure_diagnostics(
     end_date: date,
     attempt_number: int,
 ) -> Path | None:
+    """Failure-only evidence; readiness collection cannot replace cached state.
+
+    Added metadata: stage, elapsed_seconds, stage_elapsed_seconds,
+    last_observed_state, product_state_before and best-effort readiness.
+    Individual browser evidence failures remain in collection_errors.
+    """
     try:
         DEBUG_DIR.mkdir(parents=True, exist_ok=True)
         bundle = DEBUG_DIR / (
@@ -528,6 +627,22 @@ def _capture_failure_diagnostics(
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "exception": str(exception),
+        "product_name": PRODUCT_NAME,
+        "product_value": PRODUCT_VALUE,
+        # Session capabilities contain startup defaults, not subsequent timeout
+        # changes. Record our effective budgets separately to avoid ambiguity.
+        "timeout_budgets_seconds": {
+            "navigation": NAVIGATION_TIMEOUT_SECONDS,
+            "application": DEFAULT_TIMEOUT_SECONDS,
+            "script": DEFAULT_TIMEOUT_SECONDS,
+            "download": DOWNLOAD_TIMEOUT_SECONDS,
+            "connection": COMMAND_TIMEOUT_SECONDS,
+        },
+        "stage": getattr(exception, "download_stage", None),
+        "elapsed_seconds": getattr(exception, "elapsed_seconds", None),
+        "stage_elapsed_seconds": getattr(exception, "stage_elapsed_seconds", None),
+        "last_observed_state": getattr(exception, "last_yield_state", None),
+        "product_state_before": getattr(exception, "product_state_before", None),
         "collection_errors": collection_errors,
     }
 
@@ -552,6 +667,7 @@ def _capture_failure_diagnostics(
     collect("url", lambda: driver.current_url)
     collect("title", lambda: driver.title)
     collect("capabilities", lambda: driver.capabilities)
+    collect("readiness", lambda: _read_yield_page_state(driver))
     collect("controls", lambda: {
         "table_view_button": _control_state(driver, Selectors.table_view_button),
         "asset_funds_checkbox_group": _control_state(
@@ -627,6 +743,9 @@ def download_xls(
 
     If dates are omitted, the range defaults to the last seven days ending yesterday.
     If outfile_path is omitted, the browser-provided filename is saved in the current directory.
+    Stages: navigation -> application readiness -> product activation -> date
+    confirmation -> fund selection -> form submission -> table readiness -> file
+    download. Input assignment alone does not establish application readiness.
     """
 
     resolved_start_date, resolved_end_date = _resolve_dates(start_date, end_date)
@@ -637,12 +756,20 @@ def download_xls(
         download_dir = Path(tmpdir)
         driver = _build_driver(download_dir)
 
+        started = time.monotonic()
+        context = {"started": started, "last_state": None}
+        token = _CURRENT_ATTEMPT.set(context)
+        stage = _enter_stage("navigation")
         try:
             driver.get(TARGET_URL)
+            stage = _enter_stage("application readiness")
+            _wait_for_application_ready(driver)
             _click_if_visible(driver, Selectors.accept_cookies_button)
             _wait_for_css(driver, Selectors.product_select)
 
+            stage = _enter_stage("product activation")
             _select_product(driver)
+            stage = _enter_stage("date confirmation")
             _set_date(
                 driver,
                 Selectors.from_date_input,
@@ -661,31 +788,47 @@ def download_xls(
             )
             _wait_for_requested_inputs(driver, start_parts, end_parts)
 
+            stage = _enter_stage("fund selection")
             _select_all_asset_funds(driver)
+            stage = _enter_stage("form submission")
             _submit_yield_form(driver, start_parts, end_parts)
 
-            WebDriverWait(driver, DEFAULT_TIMEOUT_SECONDS).until(
-                EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, Selectors.table_view_button)
-                )
-            ).click()
+            stage = _enter_stage("table readiness")
+            _click_control(driver, Selectors.table_view_button)
             _wait_for_table_download_ready(driver, start_parts, end_parts)
             _click_table_download(driver, start_parts, end_parts)
 
+            stage = _enter_stage("file download")
             downloaded_file = _wait_for_download(download_dir)
+            if downloaded_file.stat().st_size <= 0:
+                raise RuntimeError(f"Downloaded file is empty: {downloaded_file}")
         except Exception as exception:
-            diagnostic_bundle = _capture_failure_diagnostics(
-                driver,
-                exception,
-                resolved_start_date,
-                resolved_end_date,
-                attempt_number,
+            exception.download_stage = stage
+            exception.elapsed_seconds = time.monotonic() - started
+            exception.stage_elapsed_seconds = time.monotonic() - context["stage_started"]
+            exception.last_yield_state = getattr(exception, "last_yield_state", None) or context["last_state"]
+            exception.add_note(
+                f"{stage} failed for {PRODUCT_NAME} ({PRODUCT_VALUE}), "
+                f"{resolved_start_date} to {resolved_end_date}"
             )
+            try:
+                diagnostic_bundle = _capture_failure_diagnostics(
+                    driver,
+                    exception,
+                    resolved_start_date,
+                    resolved_end_date,
+                    attempt_number,
+                )
+            except Exception as capture_error:
+                diagnostic_bundle = None
+                logger.opt(colors=False).error("Failure evidence collection failed: {}", capture_error)
+                exception.add_note(f"Failure evidence collection failed: {capture_error}")
             if diagnostic_bundle is not None:
                 exception.add_note(f"Selenium diagnostics saved to {diagnostic_bundle}")
             raise
         finally:
-            driver.quit()
+            _CURRENT_ATTEMPT.reset(token)
+            _close_driver(driver)
 
         destination = _resolve_outfile_path(downloaded_file, outfile_path)
         
@@ -706,6 +849,30 @@ def download_xls(
     return destination
 
 
+def _batch_intervals(start_date, end_date, interval, retries, min_sleep_secs):
+    if isinstance(retries, bool) or not isinstance(retries, int) or retries < 1:
+        raise ValueError("retries must be a positive total attempt count")
+    if (not isinstance(min_sleep_secs, (int, float)) or
+            not math.isfinite(min_sleep_secs) or min_sleep_secs < 0):
+        raise ValueError("min_sleep_secs must be finite and nonnegative")
+    if interval not in ("daily", "weekly"):
+        raise ValueError("interval must be daily or weekly")
+    start, end = _resolve_dates(start_date, end_date)
+    if start >= end or end > date.today():
+        raise ValueError("Batch dates must be increasing and end no later than today")
+    step = timedelta(days=1 if interval == "daily" else 7)
+    intervals = []
+    while start < end:
+        next_end = min(start + step, end)
+        intervals.append((start, next_end))
+        start = next_end
+    return intervals
+
+
+def _range(start, end):
+    return {"start": start.isoformat(), "end": end.isoformat()}
+
+
 def download_multiple_xls(
     start_date: str,
     end_date: str,
@@ -716,126 +883,108 @@ def download_multiple_xls(
     append_timestamp: bool = True,
     progress_queue: Queue = None,
     result_queue: Queue = None,
-    stop_event: Event = Event(),
+    stop_event: Event | None = None,
 ):
+    """Download a contiguous batch, stopping at the first exhausted interval.
 
-    outfile_path = Path(outfile_path).resolve() if outfile_path else Path.cwd()
+    ``retries`` is the TOTAL attempt budget per interval, including the first.
+    Zero sleep is supported. Cancellation interrupts waits and is checked before
+    each attempt; an in-flight browser command must finish or time out. A final
+    successful interval completes the batch even if cancellation arrived during
+    that attempt. Ordinary completion never sets the caller's cancellation event.
 
-    logger.opt(colors=True).info(f"Start date: <yellow>{start_date}</yellow>")
+    Return a dict with status (completed/failed/cancelled), requested_start/end,
+    total_intervals, completed_intervals, files (list[Path]), completed_ranges
+    (requested interval start/end dictionaries), completed_range, uncovered_range,
+    failed_interval, attempt_count (last attempted interval), total_attempts,
+    error, stage and diagnostic_bundle. Coverage describes successful requested
+    intervals, not a guarantee that each calendar date has a published NAV.
 
+    Queue protocol (producer and consumer must be upgraded together):
+    * progress_queue receives integer percentages, then exactly one dictionary
+      ``{"type": "finished", "status": "failed", ...}`` containing the return
+      fields, with files serialized as strings. There is no "done" sentinel.
+    * result_queue receives one list[Path], only if files exist, BEFORE the
+      terminal event. Failed/cancelled partial files remain available for merge.
+      Neither queue causes automatic merging. Invalid inputs still publish a
+      failed outcome with initialized empty results and zero completed intervals.
+    """
+    stop_event = stop_event if stop_event is not None else Event()
+    downloaded_files = []
+    intervals = []
+    outcome = {
+        "status": "failed", "requested_start": str(start_date), "requested_end": str(end_date),
+        "total_intervals": 0, "completed_intervals": 0, "completed_ranges": [],
+        "completed_range": None, "uncovered_range": None, "failed_interval": None,
+        "attempt_count": 0, "total_attempts": 0, "error": None, "stage": "validation",
+        "diagnostic_bundle": None, "files": downloaded_files,
+    }
     try:
-        while not stop_event.is_set():
-            try:
-                resolved_start_date, resolved_end_date = _resolve_dates(start_date, end_date)
-            except Exception as e:
-                logger.opt(colors=True).error(f"Invalid date: {e}")
-                return
-
-            if (
-                resolved_end_date > date.today() or
-                resolved_start_date >= resolved_end_date
-            ):
-                logger.opt(colors=True).error(f"Invalid {start_date} or {end_date}")
-                return
-
-            if interval == "daily":
-                resolved_interval = timedelta(days=1)
-            elif interval == "weekly":
-                resolved_interval = timedelta(days=7)
-            else:
-                logger.opt(colors=True).error(f"Invalid interval {interval}")
-                return
-
-            start = resolved_start_date
-            end = start + resolved_interval
-            total_intervals = (resolved_end_date - resolved_start_date) / resolved_interval
-            interval_count = 0
-            downloaded_files = []
-
-            while start < resolved_end_date:
-                if start != resolved_start_date:
-                    stop_event.wait(timeout=min_sleep_secs)
-
-                attempt = 0
-                while attempt < retries:
-                    start_end = f"{start.isoformat()} - {end.isoformat()}"
-                    try:
-                        logger.opt(colors=True).info(
-                            f"Download attempt for {start_end} "
-                            f"to <yellow>{outfile_path}</yellow>"
-                        )
-                        
-                        #output_path = f"test_{start_end}"
-                        output_path = download_xls(
-                            start_date=start.isoformat(),
-                            end_date=end.isoformat(),
-                            outfile_path=outfile_path,
-                            append_timestamp=append_timestamp,
-                            attempt_number=attempt + 1,
-                        )
-                        
-                        downloaded_files.append(output_path)
-                        
-                        logger.opt(colors=True).info(
-                            f"Download <green>success</green> for {start_end} "
-                            f"to <yellow>{output_path}</yellow>, "
-                            f"sleep <cyan>{min_sleep_secs}</cyan> secs"
-                        )
-                        
-                        start += resolved_interval
-                        end += resolved_interval
-                        interval_count += 1
-                        
-                        if progress_queue and not progress_queue.full():
-                            pct = int(interval_count / total_intervals * 100)
-                            progress_queue.put(pct)
-                            logger.opt(colors=True).info(
-                                f"Put <cyan>{pct}</cyan> in the progress_queue"
-                            )
-                        break
-                    
-                    except Exception as e:
-                        diagnostic_bundle = next(
-                            (
-                                note.removeprefix("Selenium diagnostics saved to ")
-                                for note in getattr(e, "__notes__", [])
-                                if note.startswith("Selenium diagnostics saved to ")
-                            ),
-                            None,
-                        )
-                        logger.opt(colors=False).debug(
-                            "Exception in download for {}: {}", start_end, e
-                        )
-                        if diagnostic_bundle:
-                            logger.opt(colors=False).error(
-                                "Selenium diagnostics for {} saved to {}",
-                                start_end,
-                                diagnostic_bundle,
-                            )
-                        
-                        attempt += 1
-                        if attempt < retries:
-                            sleep_sec = min_sleep_secs + randint(1, min_sleep_secs)
-                            
-                            logger.opt(colors=True).error(
-                                f"Download <red>failed</red>  for {start_end} "
-                                f"on attempt <cyan>{attempt}</cyan>, "
-                                f"sleep <cyan>{sleep_sec:>3}</cyan> secs..."
-                            )
-                            stop_event.wait(timeout=sleep_sec)
-                        
-                        else:
-                            logger.opt(colors=True).error(
-                                f"Download <red>failed</red>  for {start_end} "
-                                f"after <cyan>{retries}</cyan> attempts."
-                            )
-            stop_event.set()
+        intervals = _batch_intervals(start_date, end_date, interval, retries, min_sleep_secs)
+        outcome.update(total_intervals=len(intervals), requested_start=intervals[0][0].isoformat(),
+                       requested_end=intervals[-1][1].isoformat())
+        destination = Path(outfile_path).resolve() if outfile_path else Path.cwd()
+        outcome["stage"] = "batch execution"
+        for index, (start, end) in enumerate(intervals):
+            if stop_event.is_set() or (index > 0 and stop_event.wait(min_sleep_secs)):
+                outcome["status"] = "cancelled"
+                return outcome
+            for attempt in range(1, retries + 1):
+                if stop_event.is_set():
+                    outcome["status"] = "cancelled"
+                    return outcome
+                outcome.update(attempt_count=attempt, total_attempts=outcome["total_attempts"] + 1)
+                try:
+                    logger.opt(colors=False).info("Download {} to {}, attempt {}/{}", start, end, attempt, retries)
+                    output = download_xls(
+                        start_date=start.isoformat(), end_date=end.isoformat(),
+                        outfile_path=destination, append_timestamp=append_timestamp,
+                        attempt_number=attempt,
+                    )
+                except Exception as error:
+                    bundle = next((note.removeprefix("Selenium diagnostics saved to ")
+                                   for note in getattr(error, "__notes__", [])
+                                   if note.startswith("Selenium diagnostics saved to ")), None)
+                    outcome.update(error=str(error), stage=getattr(error, "download_stage", "download"),
+                                   diagnostic_bundle=bundle)
+                    logger.opt(colors=False).error("Download {} to {} failed: {}", start, end, error)
+                    if bundle:
+                        logger.opt(colors=False).error("Selenium diagnostics saved to {}", bundle)
+                    if stop_event.is_set():
+                        outcome["status"] = "cancelled"
+                        return outcome
+                    if attempt == retries:
+                        outcome["failed_interval"] = _range(start, end)
+                        return outcome
+                    delay = min_sleep_secs + randint(0, int(min_sleep_secs))
+                    if stop_event.wait(delay):
+                        outcome["status"] = "cancelled"
+                        return outcome
+                else:
+                    downloaded_files.append(output)
+                    outcome["completed_ranges"].append(_range(start, end))
+                    outcome.update(completed_intervals=index + 1, error=None, stage=None, diagnostic_bundle=None)
+                    if progress_queue is not None and not progress_queue.full():
+                        progress_queue.put(int((index + 1) / len(intervals) * 100))
+                    break
+        outcome["status"] = "completed"
+    except Exception as error:
+        outcome.update(status="failed", error=str(error), stage=outcome.get("stage") or "batch execution")
+        if intervals and outcome["completed_intervals"] < len(intervals):
+            start, end = intervals[outcome["completed_intervals"]]
+            outcome["failed_interval"] = _range(start, end)
+        logger.opt(colors=False).error("Download batch failed: {}", error)
     finally:
-        if progress_queue:
-            progress_queue.put("done")
-            logger.opt(colors=True).info("Put <cyan>done</cyan> in the progress_queue")
-        if result_queue:
-            result_queue.put(downloaded_files)
+        count = outcome["completed_intervals"]
+        if count:
+            outcome["completed_range"] = _range(intervals[0][0], intervals[count - 1][1])
+        if intervals and count < len(intervals):
+            outcome["uncovered_range"] = _range(intervals[count][0], intervals[-1][1])
+        if result_queue is not None and downloaded_files:
+            result_queue.put(list(downloaded_files))
+        if progress_queue is not None:
+            progress_queue.put({"type": "finished", **outcome, "files": [str(path) for path in downloaded_files]})
+    return outcome
 
 
 if __name__ == "__main__":
@@ -898,7 +1047,7 @@ if __name__ == "__main__":
         type=int,
         default=20,
         required=False,
-        help="Number of retry attempts for downloading yields.",
+        help="Total number of attempts per interval, including the first attempt.",
     )
     parser.add_argument(
         "--min-sleep-secs",

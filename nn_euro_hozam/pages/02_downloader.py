@@ -1,7 +1,4 @@
-from loguru import logger
-
 import streamlit as st
-import streamlit.components.v1 as components
 import time
 from config import XLS_DIR
 from downloader import download_multiple_xls
@@ -9,6 +6,7 @@ from datetime import date, datetime
 from queue import Queue, Empty
 from threading import Thread, Event
 from importer import merge_xls_with_nn, load_nn_from_db
+from download_status import collect_download_files, consume_download_progress, download_worker_alive
 
 
 if "progress_queue" not in st.session_state:
@@ -19,37 +17,21 @@ if "result_queue" not in st.session_state:
 
 if "stop_event" not in st.session_state:
     st.session_state.stop_event = Event()
+if "task_running" not in st.session_state:
+    st.session_state.task_running = False
+if "progress" not in st.session_state:
+    st.session_state.progress = 0
+
+consume_download_progress(st.session_state)
+collect_download_files(st.session_state)
 
 
-@st.fragment(run_every=1)  # Poll every 2 seconds
+@st.fragment(run_every=1)
 def progress_monitor():
-    if not st.session_state.get("task_running"):
-        return
-
-    latest = None
-    q = st.session_state.progress_queue
-    
-    while True:
-        try:
-            latest = q.get_nowait()
-        except Empty:
-            break
-
-    if latest is not None:
-        if latest == "done":
-            st.session_state.stop_event.clear()
-            st.session_state.task_running = False
-            st.session_state.progress = 100
-            st.success("Task complete!")
-            st.rerun() 
-        else:
-            try:
-                val = int(latest)
-                st.session_state.progress = val
-            except (ValueError, TypeError):
-                pass
-
-    # Display
+    if consume_download_progress(st.session_state):
+        st.rerun()
+    if not st.session_state.task_running and not download_worker_alive(st.session_state):
+        st.rerun()
     pct = st.session_state.get("progress", 0)
     st.progress(pct / 100.0, text=f"Progress: {pct}%")
 
@@ -64,6 +46,30 @@ st.markdown(
     "<h1 style='text-align: center;'>Downloader</h1>",
     unsafe_allow_html=True
 )
+
+outcome = st.session_state.get("download_outcome")
+if outcome:
+    if outcome["status"] == "completed":
+        st.success("Download complete!")
+    elif outcome["status"] == "failed":
+        st.error("Download failed. The batch stopped.")
+    else:
+        st.warning("Download cancelled.")
+    st.write(f"Completed intervals: {outcome['completed_intervals']}/{outcome['total_intervals']}")
+    for field, label in (("completed_range", "Downloaded coverage"),
+                         ("failed_interval", "Failed interval"),
+                         ("uncovered_range", "Not downloaded")):
+        coverage = outcome.get(field)
+        if coverage:
+            st.write(f"{label}: {coverage['start']} to {coverage['end']}")
+    if outcome.get("error"):
+        st.write(f"Failure stage: {outcome.get('stage') or 'batch'}")
+        st.code(outcome["error"], language=None)
+    if outcome.get("diagnostic_bundle"):
+        st.caption(f"Diagnostics: {outcome['diagnostic_bundle']}")
+    if outcome["status"] != "completed" and outcome["completed_intervals"]:
+        st.warning("Partial download only. Merging these files does not complete the requested range.")
+    st.progress(st.session_state.progress / 100, text=f"Progress: {st.session_state.progress}%")
 
 
 col1, col2, col3, col4, col5 = st.columns([1.5, 0.5, 1.5, 2, 4])
@@ -130,7 +136,7 @@ if "download_start" in st.session_state and "download_end" in st.session_state:
     if "progress" not in st.session_state:
         st.session_state.progress = 0
     
-    if not st.session_state.result_queue.empty():
+    if st.session_state.download_files:
         with col4:
             st.markdown("""
                 <style>
@@ -147,20 +153,12 @@ if "download_start" in st.session_state and "download_end" in st.session_state:
                 </style>
             """, unsafe_allow_html=True)
             
-            if st.button("Merge", disabled=st.session_state.task_running,
+            merge_label = "Merge partial results" if outcome and outcome["status"] != "completed" else "Merge"
+            if st.button(merge_label, disabled=st.session_state.task_running or download_worker_alive(st.session_state),
                     type="primary",
                     width="content"
                 ):
-                rq = st.session_state.result_queue
-                downloaded_files = []
-                
-                while True:
-                    try:
-                        files = rq.get_nowait()
-                        downloaded_files.extend(files)
-                    except Empty:
-                        break
-                
+                downloaded_files = list(st.session_state.download_files)
                 merge_xls_with_nn(downloaded_files)
                 st.session_state.df = load_nn_from_db(
                      st.session_state.selected_db_file
@@ -168,6 +166,7 @@ if "download_start" in st.session_state and "download_end" in st.session_state:
                 df_start, df_end = st.session_state.df["opening_date"].iloc[[0, -1]]
                 st.session_state.df_start = df_start
                 st.session_state.df_end = df_end
+                st.session_state.download_files = []
                 st.success("Merged new data into dataset")
                 st.rerun()
     
@@ -188,12 +187,13 @@ if "download_start" in st.session_state and "download_end" in st.session_state:
                 </style>
             """, unsafe_allow_html=True)
             
-            if st.button("Download", disabled=st.session_state.task_running,
+            if st.button("Download", disabled=download_worker_alive(st.session_state),
                     type="primary",
                     width="content"
                 ):
                 st.session_state.task_running = True
                 st.session_state.progress = 0
+                st.session_state.pop("download_outcome", None)
                 st.session_state.stop_event.clear()
                 while not st.session_state.progress_queue.empty():
                     try:
@@ -213,6 +213,7 @@ if "download_start" in st.session_state and "download_end" in st.session_state:
                 }
                 
                 t = Thread(target=download_multiple_xls, kwargs=kwargs, daemon=True)
+                st.session_state.download_thread = t
                 t.start()
                 st.rerun()
 
@@ -243,8 +244,8 @@ if "download_start" in st.session_state and "download_end" in st.session_state:
 col1, col2, col3 = st.columns([3.5, 2, 4])
 
 with col1:  
-    if st.session_state.task_running:
+    if st.session_state.task_running or download_worker_alive(st.session_state):
         progress_monitor()
-    elif not st.session_state.result_queue.empty():
-        st.warning("Click on 'Merge' when download is completed!")
+    elif st.session_state.download_files:
+        st.warning("Use the Merge button to import the available downloaded files.")
         st.warning("Don't forget to also do a Backup!")
